@@ -1,0 +1,35 @@
+[build-system]
+requires = ["scikit-build-core>=0.10"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "coven"
+version = "0.1.0"
+description = "Parallel PRM roadmap construction and replanning on VAMP"
+readme = "README.md"
+requires-python = ">=3.10"
+# Must be the VAMP commit that CMakeLists.txt builds against
+dependencies = [
+    "vamp-planner @ git+https://github.com/KavrakiLab/vamp.git@27cb9b66ebd8d101ce88d330f3b028398afc1cfa",
+    "numpy",
+]
+
+[project.optional-dependencies]
+demo = ["viser", "yourdfpy"]
+bench = ["matplotlib"]
+test = ["pytest"]
+
+[tool.scikit-build]
+minimum-version = "0.10"
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["coven"]
+cmake.build-type = "Release"
+
+[tool.scikit-build.cmake.define]
+COVEN_BUILD_PYTHON = "ON"
+COVEN_BUILD_TESTS = "OFF"
+COVEN_BUILD_BENCH = "OFF"
+VAMP_LTO = "OFF"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

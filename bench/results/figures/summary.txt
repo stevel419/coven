@@ -83,21 +83,21 @@ Figure 5: full revalidation of a roadmap
 wrote 5_revalidate.png
 
 Figure 6: p99 latency (ms) against throughput (requests/s), lazy, one scene moving every second, 16 threads
-  window     0 us: 96/s p50 0.4 p99 32.2  313/s p50 0.4 p99 8.6  1044/s p50 0.4 p99 14.8  3038/s p50 1.2 p99 16.6  9915/s p50 3.0 p99 33.8
-  window   250 us: 96/s p50 0.7 p99 33.3  313/s p50 0.6 p99 8.0  1043/s p50 0.8 p99 15.8  3037/s p50 1.4 p99 16.1  9913/s p50 3.1 p99 36.2
-  window  1000 us: 96/s p50 1.4 p99 34.5  313/s p50 1.4 p99 9.5  1043/s p50 1.5 p99 15.9  3036/s p50 1.7 p99 15.6  9912/s p50 3.0 p99 32.5
-  window  4000 us: 96/s p50 4.5 p99 37.7  313/s p50 4.3 p99 11.1  1040/s p50 3.4 p99 17.5  2991/s p50 2.7 p99 16.6  9910/s p50 3.1 p99 31.1
+  window     0 us: 96/s p50 0.4 p99 31.1  313/s p50 0.3 p99 8.5  1044/s p50 0.4 p99 15.0  3038/s p50 1.1 p99 15.0  9917/s p50 2.3 p99 20.4  29598/s p50 4.2 p99 48.0
+  window   250 us: 96/s p50 0.7 p99 31.3  313/s p50 0.7 p99 8.2  1043/s p50 0.8 p99 14.5  3037/s p50 1.3 p99 15.3  9916/s p50 2.2 p99 19.6  29552/s p50 4.4 p99 56.2
+  window  1000 us: 96/s p50 1.4 p99 32.6  313/s p50 1.4 p99 9.1  1043/s p50 1.5 p99 14.4  3038/s p50 1.6 p99 15.2  9915/s p50 2.3 p99 20.1  29549/s p50 4.2 p99 47.1
+  window  4000 us: 96/s p50 4.5 p99 37.9  313/s p50 4.3 p99 10.7  1041/s p50 3.3 p99 15.7  3037/s p50 2.5 p99 14.7  9840/s p50 2.3 p99 19.8  29616/s p50 4.3 p99 56.3
 wrote 6_serving.png
 
 Figure 7: capacity (requests/s with p99 <= 100 ms), scenes moving every second
-  eager, 1 shared scene: 1t 2979/s  4t 9920/s  16t 9963/s
+  eager, 1 shared scene: 1t 2979/s  4t 9930/s  16t 29892/s
   eager, 16 separate scenes: 1t 0/s  4t 0/s  16t 0/s
-  lazy, 1 shared scene: 1t 313/s  4t 3036/s  16t 9915/s
-  lazy, 16 separate scenes: 1t 0/s  4t 309/s  16t 1043/s
+  lazy, 1 shared scene: 1t 313/s  4t 3038/s  16t 29598/s
+  lazy, 16 separate scenes: 1t 0/s  4t 309/s  16t 3031/s
 wrote 7_scenes.png
 
 Figure 8: lazy and eager checking, one scene, 16 threads
-  lazy: update 10: capacity 306/s, p50 at 100/s 1.7 ms  update 100: capacity 9755/s, p50 at 100/s 1.4 ms  update 1000: capacity 9915/s, p50 at 100/s 0.4 ms  update never: capacity 9995/s, p50 at 100/s 0.4 ms
-  eager: update 10: capacity 9871/s, p50 at 100/s 30.7 ms  update 100: capacity 9965/s, p50 at 100/s 0.4 ms  update 1000: capacity 9963/s, p50 at 100/s 0.4 ms  update never: capacity 9999/s, p50 at 100/s 0.4 ms
+  lazy: update 10: capacity 307/s, p50 at 100/s 1.7 ms  update 100: capacity 9990/s, p50 at 100/s 1.2 ms  update 1000: capacity 29598/s, p50 at 100/s 0.4 ms  update never: capacity 30010/s, p50 at 100/s 0.4 ms
+  eager: update 10: capacity 9874/s, p50 at 100/s 28.7 ms  update 100: capacity 29901/s, p50 at 100/s 0.4 ms  update 1000: capacity 29892/s, p50 at 100/s 0.4 ms  update never: capacity 30016/s, p50 at 100/s 0.4 ms
 wrote 8_modes.png
 figure 9 skipped: no service-http sweep

@@ -29,10 +29,15 @@
 #define COVEN_OMP(directive)
 #endif
 
-// OpenMP schedule of the collision-checking loops. Guided was the fastest in the benchmarks. Define
-// COVEN_SCHEDULE=runtime to pick the schedule at run time with OMP_SCHEDULE or omp_set_schedule().
-#ifndef COVEN_SCHEDULE
-#define COVEN_SCHEDULE guided
+// OpenMP schedules of the collision-checking loops, the fastest in the benchmarks: guided for roadmap
+// construction, dynamic for revalidation. Define COVEN_SCHEDULE (for example as runtime, to pick it
+// with OMP_SCHEDULE or omp_set_schedule()) to use one schedule for every loop.
+#ifdef COVEN_SCHEDULE
+#define COVEN_BUILD_SCHEDULE COVEN_SCHEDULE
+#define COVEN_RECHECK_SCHEDULE COVEN_SCHEDULE
+#else
+#define COVEN_BUILD_SCHEDULE guided
+#define COVEN_RECHECK_SCHEDULE dynamic
 #endif
 
 namespace coven
@@ -93,7 +98,7 @@ namespace coven
             valid.resize(n);
             // fkcc_attach() poses the attachment through a mutable member of the shared environment
             const bool parallel = not environment.attachments;
-            COVEN_OMP(omp parallel for schedule(COVEN_SCHEDULE) if (parallel))
+            COVEN_OMP(omp parallel for schedule(COVEN_BUILD_SCHEDULE) if (parallel))
             for (std::size_t e = 0; e < n; ++e)
             {
                 const std::pair<Configuration, Configuration> endpoints = edge(e);
@@ -374,14 +379,14 @@ namespace coven
             validity.edges.resize(n_edges);
 
             const bool parallel = not environment.attachments;
-            COVEN_OMP(omp parallel for schedule(COVEN_SCHEDULE) if (parallel))
+            COVEN_OMP(omp parallel for schedule(COVEN_RECHECK_SCHEDULE) if (parallel))
             for (std::size_t v = 0; v < n; ++v)
             {
                 validity.vertices[v] = vamp::planning::validate_motion<Robot, rake, 1>(
                     roadmap.vertices[v], roadmap.vertices[v], environment);
             }
 
-            COVEN_OMP(omp parallel for schedule(COVEN_SCHEDULE) if (parallel))
+            COVEN_OMP(omp parallel for schedule(COVEN_RECHECK_SCHEDULE) if (parallel))
             for (std::size_t e = 0; e < n_edges; ++e)
             {
                 const auto [i, j] = graph.edges[e];

@@ -26,8 +26,9 @@ SURFACE, TEXT, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e6e5e0"
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
 RAMP = ["#86b6ef", "#2a78d6", "#104281"]
 DIVERGING = LinearSegmentedColormap.from_list("slower_faster", ["#d03b3b", "#f0efec", "#2a78d6"])
-# Schedule of every run except the schedule sweep (coven_bench --schedule default)
+# Schedules of every run outside the schedule sweeps (coven_bench's defaults, the library's defaults)
 DEFAULT_SCHEDULE = "guided"
+RECHECK_SCHEDULE = "dynamic"
 PHASES = [("validate_ns", "edge validation"), ("neighbor_ns", "neighbor search"), ("sample_ns", "sampling"),
           ("insert_ns", "insertion"), ("other_ns", "other")]
 
@@ -182,29 +183,47 @@ def figure_breakdown(runs, out, lines):
 
 
 def figure_schedule(runs, out, lines):
-    schedules = defaultdict(dict)
-    for key, rows in select(runs, mode="parallel").items():
-        schedules[(key[1], key[2], key[3], key[5])][key[4]] = rows
-    groups = defaultdict(list)
-    for env, nodes, batch, schedule in schedules:
-        groups[(env, nodes, batch)].append(schedule)
-    groups = {g: s for g, s in groups.items() if len(s) > 1 and ("serial", g[0], g[1], 0, 1, "") in runs}
-    if not groups:
+    # One panel per mode that was run with several schedules: construction as speedup over the serial
+    # PRM, revalidation as edges rechecked per second
+    panels = []
+    for mode in ("parallel", "revalidate"):
+        schedules = defaultdict(dict)
+        for key, rows in select(runs, mode=mode).items():
+            schedules[(key[1], key[2], key[3], key[5])][key[4]] = rows
+        groups = defaultdict(list)
+        for env, nodes, batch, schedule in schedules:
+            groups[(env, nodes, batch)].append(schedule)
+        groups = {g: s for g, s in groups.items()
+                  if len(s) > 1 and (mode == "revalidate" or ("serial", g[0], g[1], 0, 1, "") in runs)}
+        if groups:
+            group = max(groups, key=lambda g: (len(groups[g]), g[0] == "cage"))
+            panels.append((mode, group, {s: schedules[group + (s,)] for s in groups[group]}))
+    if not panels:
         return lines.append("figure 3 skipped: no schedule sweep")
-    env, nodes, batch = max(groups, key=lambda g: (len(groups[g]), g[0] == "cage"))
-    serial = med(runs[("serial", env, nodes, 0, 1, "")])
-    fig, ax = plt.subplots(figsize=(5.6, 3.8))
-    lines.append(f"\nFigure 3: speedup by OpenMP schedule, {env}, {nodes} nodes, batch {batch}")
-    for schedule, color in zip(sorted(groups[(env, nodes, batch)]), SERIES):
-        by_threads = schedules[(env, nodes, batch, schedule)]
-        threads = sorted(by_threads)
-        speedup = [serial / med(by_threads[t]) for t in threads]
-        ax.plot(threads, speedup, color=color, marker="o", label=schedule.replace(",", ", chunk "))
-        lines.append(f"  {schedule:12s} " + "  ".join(f"{t}t {s:.2f}x" for t, s in zip(threads, speedup)))
-    thread_axis(ax, threads)
-    ax.set_ylabel("speedup over serial PRM")
-    ax.set_title(f"Schedule of the edge validation loop: {env}, {nodes} nodes")
-    ax.legend(loc="upper left")
+    fig, axes = plt.subplots(1, len(panels), figsize=(5.6 * len(panels), 3.8), squeeze=False)
+    lines.append("\nFigure 3: OpenMP schedule")
+    for ax, (mode, (env, nodes, batch), by_schedule) in zip(axes[0], panels):
+        if mode == "parallel":
+            serial = med(runs[("serial", env, nodes, 0, 1, "")])
+            value = lambda rows: serial / med(rows)  # noqa: E731
+            ax.set_ylabel("speedup over serial PRM")
+            ax.set_title(f"Roadmap construction: {env}, {nodes} nodes")
+            lines.append(f"  construction, speedup over serial PRM, {env}, {nodes} nodes, batch {batch}")
+        else:
+            value = lambda rows: rows[0]["edges_checked"] / (med(rows) / 1e9) / 1e6  # noqa: E731
+            ax.set_ylabel("million edges rechecked per second")
+            ax.set_title(f"Revalidation: {env}, {nodes} nodes")
+            lines.append(f"  revalidation, million edges per second, {env}, {nodes} nodes")
+        for schedule in sorted(by_schedule):
+            color = dict(zip(["dynamic", "dynamic,16", "guided", "static"], SERIES)).get(schedule, SERIES[4])
+            by_threads = by_schedule[schedule]
+            threads = sorted(by_threads)
+            values = [value(by_threads[t]) for t in threads]
+            ax.plot(threads, values, color=color, marker="o", label=schedule.replace(",", ", chunk "))
+            lines.append(f"    {schedule:12s} " + "  ".join(f"{t}t {v:.2f}" for t, v in zip(threads, values)))
+        thread_axis(ax, threads)
+        ax.set_ylim(bottom=0)
+        ax.legend(loc="upper left")
     save(fig, out, "3_schedule.png", lines)
 
 
@@ -252,7 +271,7 @@ def figure_sizes(runs, out, lines):
 
 def figure_revalidate(runs, out, lines):
     by_size = defaultdict(dict)
-    for key, rows in select(runs, mode="revalidate").items():
+    for key, rows in select(runs, mode="revalidate", schedule=RECHECK_SCHEDULE).items():
         by_size[(key[1], key[2])][key[4]] = rows
     if not by_size:
         return lines.append("figure 5 skipped: no revalidation sweep")

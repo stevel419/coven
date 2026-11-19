@@ -44,8 +44,9 @@ Two properties of VAMP make this safe:
 - `nigh`'s `nearest()` is `const` and keeps its search state local, so threads can query the
   neighbor tree at once as long as nobody inserts. Step 2 relies on this; step 4 is the only writer.
 
-The collision-checking loops use OpenMP's `guided` schedule, the fastest in the benchmarks. Define
-`COVEN_SCHEDULE=runtime` when compiling to choose the schedule with `OMP_SCHEDULE` instead.
+The collision-checking loops use the OpenMP schedules that were fastest in the benchmarks: `guided`
+for construction and `dynamic` for revalidation. Define `COVEN_SCHEDULE=runtime` when compiling to
+choose the schedule with `OMP_SCHEDULE` instead.
 
 ## Install
 
@@ -153,7 +154,7 @@ roadmap size, commit, compiler and CPU.
 |---|---|---|
 | `scaling` | threads × environment, and threads × schedule. 10,000 nodes, batch 1024 | speedup, phase breakdown, schedule |
 | `sizes` | batch size (1 to 16,384) × roadmap size (100 to 100,000), all cores | batch size |
-| `revalidate` | threads × roadmap size (5,000 to 100,000) | revalidation |
+| `revalidate` | threads × roadmap size (5,000 to 100,000), and threads × schedule at 20,000 nodes | revalidation, schedule |
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j --target coven_bench

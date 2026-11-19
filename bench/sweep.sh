@@ -5,7 +5,7 @@
 #
 # scaling     threads x environment, and threads x schedule       (figures 1, 2, 3)
 # sizes       batch size x roadmap size at the full thread count  (figure 4)
-# revalidate  full recheck of a roadmap, threads x roadmap size   (figure 5)
+# revalidate  full recheck of a roadmap, threads x roadmap size, and threads x schedule (figure 5)
 # quick       a few small runs of every kind, to test the pipeline
 #
 # The thread counts are 1, 2, 4, ... up to the cores of the Slurm allocation (or of this machine).
@@ -77,6 +77,12 @@ revalidate)
         [ "$nodes" -ge 100000 ] && r=$(((repeats + 3) / 4))
         for t in "${threads[@]}"; do
             run --mode revalidate --nodes "$nodes" --threads "$t" --repeats "$r"
+        done
+    done
+    for t in "${threads[@]}"; do
+        for schedule in "static 0" "guided 0" "dynamic 16"; do
+            set -- $schedule
+            run --mode revalidate --nodes 20000 --threads "$t" --schedule "$1" --chunk "$2" --repeats "$repeats"
         done
     done
     ;;

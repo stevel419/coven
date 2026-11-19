@@ -1,7 +1,7 @@
 // Benchmark driver. Prints one CSV row per timed run.
 //
 //   coven_bench --mode serial|parallel|revalidate [--env cage] [--nodes 10000] [--batch 1024]
-//               [--threads 1] [--schedule guided] [--chunk 0] [--repeats 20] [--warmup 1]
+//               [--threads 1] [--schedule static|dynamic|guided] [--chunk 0] [--repeats 20] [--warmup 1]
 //               [--commit HASH] [--header] [--check]
 //
 // serial      unmodified vamp PRM::build_roadmap()
@@ -10,6 +10,7 @@
 //
 // --env is empty, cage, or spheresN (N random spheres, fixed seed).
 // --check also compares the parallel roadmap against the serial one and fails if they differ.
+// --schedule defaults to guided for parallel and dynamic for revalidate, as in the library.
 
 #include <algorithm>
 #include <array>
@@ -132,7 +133,7 @@ auto main(int argc, char **argv) -> int
     std::map<std::string, std::string> args{
         {"mode", "parallel"}, {"env", "cage"},  {"nodes", "10000"},  {"batch", "1024"},
         {"threads", "1"},     {"chunk", "0"},   {"repeats", "20"},   {"warmup", "1"},
-        {"commit", "unknown"}, {"schedule", "guided"},
+        {"commit", "unknown"}, {"schedule", ""},
     };
 
     bool header = false;
@@ -160,6 +161,11 @@ auto main(int argc, char **argv) -> int
     }
 
     const auto mode = args["mode"];
+    if (args["schedule"].empty())
+    {
+        // The library's defaults (COVEN_BUILD_SCHEDULE and COVEN_RECHECK_SCHEDULE in pprm.hh)
+        args["schedule"] = mode == "revalidate" ? "dynamic" : "guided";
+    }
     const auto nodes = std::stoul(args["nodes"]);
     const auto threads = std::stoi(args["threads"]);
     const auto chunk = std::stoi(args["chunk"]);

@@ -15,6 +15,8 @@ Coven checks them across all cores with OpenMP, and reuses the roadmap as obstac
 - **11× faster construction, 13–14× faster revalidation** on 16 cores.
 - **Replanning on a fixed roadmap.** Recheck every vertex and edge after the obstacles move, then
   search what is still valid.
+- **Planning service.** One roadmap serves many clients over HTTP, collision checks are batched
+  into one parallel loop.
 - **Header-only C++17 and Python.** Bindings for every VAMP robot, using VAMP's own Python types.
   VAMP itself is unmodified and pinned by commit.
 
@@ -69,6 +71,27 @@ Configurations are `float32` numpy arrays. Roadmaps and paths are VAMP's Python 
 `coven.Replanner` wraps the last three calls for the Panda. Robots: `coven.panda`, `ur5`, `fetch`,
 `baxter` and `sphere`.
 
+## Planning service
+
+```bash
+coven-server --nodes 10000 --port 8000
+
+curl -X PUT localhost:8000/scenes/cell -d '{"spheres": [{"center": [0.4, 0.4, 0.6], "radius": 0.2}]}'
+curl -X POST localhost:8000/scenes/cell/plan \
+  -d '{"start": [0, -0.785, 0, -2.356, 0, 1.571, 0.785], "goal": [2.35, 1, 0, -0.8, 0, 2.5, 0.785]}'
+```
+
+- **Scenes.** Any number of named obstacle sets share one roadmap. Each reply names the scene version
+  its path is collision-free in.
+- **Batching.** Requests that arrive together are planned in rounds: every request's shortest route is
+  found, the unchecked edges on all routes are checked in one parallel loop (once each, when routes
+  share them), and the requests whose route is valid are answered.
+- **Lazy or eager.** By default only edges on candidate routes are checked (Lazy PRM). `--eager`
+  rechecks the whole roadmap on every scene change instead.
+
+API: [`coven/server.py`](coven/server.py). In C++: `coven::Service` in
+[`include/coven/service.hh`](include/coven/service.hh); in Python: `coven.panda.Service`.
+
 ## Performance
 
 16 cores of a 2 × AMD EPYC 9254, GCC 13.2.0, Panda in VAMP's sphere cage.
@@ -85,14 +108,14 @@ Setup, per-environment results, OpenMP schedules, batch sizes and how to reprodu
 
 [`coven::PPRM`](include/coven/pprm.hh) builds the roadmap in batches. For each batch it:
 
-- checks the samples in parallel;
-- checks all their candidate edges in one OpenMP loop;
-- inserts them in the serial planner's order, so the roadmap matches VAMP's exactly.
+- checks the samples in parallel
+- checks all their candidate edges in one OpenMP loop
+- inserts them in the serial planner's order, so the roadmap matches VAMP's exactly
 
 After the obstacles move:
 
-- `revalidate()` rechecks every vertex and edge in parallel;
-- `query()` runs A* over what is still valid.
+- `revalidate()` rechecks every vertex and edge in parallel
+- `query()` runs A* over what is still valid
 
 ## Acknowledgements
 

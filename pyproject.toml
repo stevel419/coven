@@ -14,6 +14,9 @@ dependencies = [
     "numpy",
 ]
 
+[project.scripts]
+coven-server = "coven.server:main"
+
 [project.optional-dependencies]
 demo = ["viser", "yourdfpy"]
 bench = ["matplotlib"]

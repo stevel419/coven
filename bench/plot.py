@@ -2,7 +2,8 @@
 
     python bench/plot.py bench/results/*.csv --out bench/results/figures
 
-Writes six PNG files and summary.txt (the numbers behind the figures) into the output directory.
+Writes the PNG files and summary.txt (the numbers behind the figures) into the output directory:
+figures 0-5 from coven_bench's CSV files, 6-9 from the planning service's load tests.
 Runs of the same configuration from several files are pooled. A figure is skipped, with a message,
 when the CSV files do not contain the sweep it needs.
 """
@@ -347,20 +348,171 @@ def figure_revalidate(runs, out, lines):
     save(fig, out, "5_revalidate.png", lines)
 
 
+# Planning service load tests (coven_load and load.py)
+
+SLO_MS = 100  # p99 latency target for "capacity": the highest throughput served within it, nothing refused
+
+
+def load_service(paths):
+    """Load test rows; of several runs of one configuration, the last read is kept."""
+    rows = {}
+    for path in paths:
+        with open(path, newline="") as f:
+            for row in csv.DictReader(f):
+                for name in ("nodes", "threads", "window_us", "scenes", "update_ms", "requests", "ok", "overloaded",
+                             "no_path"):
+                    row[name] = int(float(row[name]))
+                for name in ("rate", "throughput", "p50_ms", "p90_ms", "p99_ms", "p999_ms", "rounds", "checks",
+                             "searches", "checks_per_round", "update_busy", "search_busy", "check_busy"):
+                    row[name] = float(row[name])
+                key = tuple(row[k] for k in ("transport", "mode", "env", "nodes", "threads", "window_us", "rate",
+                                             "scenes", "update_ms"))
+                rows[key] = row
+    return list(rows.values())
+
+
+def pick(rows, **want):
+    return sorted((r for r in rows if all(r[k] == v for k, v in want.items())), key=lambda r: r["rate"])
+
+
+def capacity(rows):
+    served = [r["throughput"] for r in rows if r["overloaded"] == 0 and r["p99_ms"] <= SLO_MS]
+    return max(served, default=0.0)
+
+
+def figure_serving(rows, out, lines):
+    inproc = [r for r in rows if r["transport"] == "inproc"]
+    if not inproc:
+        return lines.append("figure 6 skipped: no service sweep")
+    threads = max(r["threads"] for r in inproc)
+    base = dict(transport="inproc", mode="lazy", scenes=1, update_ms=1000, threads=threads)
+    windows = sorted({r["window_us"] for r in pick(inproc, **base)})
+    if not windows:
+        return lines.append("figure 6 skipped: no window sweep")
+    fig, ax = plt.subplots(figsize=(5.6, 3.8))
+    lines.append(f"\nFigure 6: p99 latency (ms) against throughput (requests/s), lazy, one scene moving every "
+                 f"second, {threads} threads")
+    for window, color in zip(windows, SERIES):
+        points = [r for r in pick(inproc, window_us=window, **base) if r["overloaded"] == 0]
+        ax.plot([r["throughput"] for r in points], [r["p99_ms"] for r in points], color=color, marker="o",
+                label=f"window {window} µs")
+        lines.append(f"  window {window:5d} us: " + "  ".join(
+            f"{r['throughput']:.0f}/s p50 {r['p50_ms']:.1f} p99 {r['p99_ms']:.1f}" for r in points))
+    ax.axhline(SLO_MS, color=MUTED, linewidth=1.2, linestyle="--")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("throughput (requests per second)")
+    ax.set_ylabel("p99 latency (ms)")
+    ax.set_title("Latency against throughput, by batching window")
+    ax.legend(loc="upper left")
+    save(fig, out, "6_serving.png", lines)
+
+
+def figure_scenes(rows, out, lines):
+    base = dict(transport="inproc", update_ms=1000, window_us=0)
+    points = defaultdict(dict)
+    for r in pick(rows, **base):
+        points[(r["mode"], r["scenes"])].setdefault(r["threads"], []).append(r)
+    if len({scenes for _, scenes in points}) < 2:
+        return lines.append("figure 7 skipped: no shared and separate scene runs")
+    fig, ax = plt.subplots(figsize=(5.6, 3.8))
+    lines.append(f"\nFigure 7: capacity (requests/s with p99 <= {SLO_MS} ms), scenes moving every second")
+    for (mode, scenes), by_threads in sorted(points.items()):
+        threads = sorted(by_threads)
+        values = [capacity(by_threads[t]) for t in threads]
+        label = f"{mode}, " + ("1 shared scene" if scenes == 1 else f"{scenes} separate scenes")
+        color = SERIES[0] if mode == "lazy" else SERIES[1]
+        ax.plot(threads, values, color=color, marker="o", linestyle="-" if scenes == 1 else "--", label=label)
+        lines.append(f"  {label}: " + "  ".join(f"{t}t {v:.0f}/s" for t, v in zip(threads, values)))
+    thread_axis(ax, sorted({t for by in points.values() for t in by}))
+    ax.set_ylim(bottom=0)
+    ax.set_ylabel(f"requests per second, p99 ≤ {SLO_MS} ms")
+    ax.set_title("Capacity: one shared scene against separate scenes")
+    ax.legend(loc="upper left")
+    save(fig, out, "7_scenes.png", lines)
+
+
+def figure_modes(rows, out, lines):
+    inproc = [r for r in rows if r["transport"] == "inproc"]
+    if not inproc:
+        return lines.append("figure 8 skipped: no service sweep")
+    threads = max(r["threads"] for r in inproc)
+    base = dict(transport="inproc", scenes=1, window_us=0, threads=threads)
+    updates = [u for u in (10, 100, 1000, 0) if pick(inproc, mode="eager", update_ms=u, **base)]
+    if not updates:
+        return lines.append("figure 8 skipped: no eager runs")
+    fig, (left, right) = plt.subplots(1, 2, figsize=(10, 3.8))
+    lines.append(f"\nFigure 8: lazy and eager checking, one scene, {threads} threads")
+    x = range(len(updates))
+    low_rate = min(r["rate"] for r in inproc)
+    for k, (mode, color) in enumerate(zip(("lazy", "eager"), SERIES)):
+        caps = [capacity(pick(inproc, mode=mode, update_ms=u, **base)) for u in updates]
+        medians = [next((r["p50_ms"] for r in pick(inproc, mode=mode, update_ms=u, rate=low_rate, **base)), 0.0)
+                   for u in updates]
+        offset = [i + (k - 0.5) * 0.36 for i in x]
+        left.bar(offset, caps, 0.34, color=color, label=mode)
+        right.bar(offset, medians, 0.34, color=color, label=mode)
+        lines.append(f"  {mode}: " + "  ".join(
+            f"update {u or 'never'}: capacity {c:.0f}/s, p50 at {low_rate:.0f}/s {m:.1f} ms"
+            for u, c, m in zip(updates, caps, medians)))
+    names = [("every second" if u == 1000 else f"every {u} ms") if u else "never" for u in updates]
+    for ax in (left, right):
+        ax.set_xticks(list(x), names)
+        ax.set_xlabel("obstacles move")
+        ax.grid(axis="x", visible=False)
+    left.set_title(f"Capacity (requests/s, p99 ≤ {SLO_MS} ms)")
+    right.set_title(f"Median latency at {low_rate:.0f} requests/s (ms)")
+    right.legend(loc="upper right")
+    save(fig, out, "8_modes.png", lines)
+
+
+def figure_http(rows, out, lines):
+    http = [r for r in rows if r["transport"] == "http"]
+    if not http:
+        return lines.append("figure 9 skipped: no service-http sweep")
+    threads = http[0]["threads"]
+    base = dict(mode="lazy", scenes=1, update_ms=1000, window_us=0, threads=threads)
+    fig, ax = plt.subplots(figsize=(5.6, 3.8))
+    lines.append("\nFigure 9: latency in process and over HTTP (ms), lazy, one scene moving every second")
+    for (transport, label), color in zip((("inproc", "in process"), ("http", "over HTTP")), SERIES):
+        points = [r for r in pick(rows, transport=transport, **base) if r["rate"] <= max(h["rate"] for h in http)]
+        rates = [r["rate"] for r in points]
+        ax.plot(rates, [r["p50_ms"] for r in points], color=color, marker="o", label=f"{label}, p50")
+        ax.plot(rates, [r["p99_ms"] for r in points], color=color, marker="o", linestyle="--", label=f"{label}, p99")
+        lines.append(f"  {label}: " + "  ".join(
+            f"{r['rate']:.0f}/s p50 {r['p50_ms']:.1f} p99 {r['p99_ms']:.1f}" for r in points))
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("offered requests per second")
+    ax.set_ylabel("latency (ms)")
+    ax.set_title("In process against over HTTP")
+    ax.legend(loc="upper left")
+    save(fig, out, "9_http.png", lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("csv", nargs="+", type=Path)
     parser.add_argument("--out", type=Path, default=Path("bench/results/figures"))
     args = parser.parse_args()
-    runs = load(args.csv)
-    if not runs:
+
+    # Load test files have their own columns
+    service_paths = [p for p in args.csv if "transport" in p.open().readline()]
+    runs = load([p for p in args.csv if p not in service_paths])
+    service = load_service(service_paths)
+    if not runs and not service:
         sys.exit("no rows in the given CSV files")
     args.out.mkdir(parents=True, exist_ok=True)
 
-    first = next(iter(runs.values()))[0]
+    first = next(iter(runs.values()))[0] if runs else service[0]
     lines = [f"cpu: {first['cpu']}", f"compiler: {first['compiler']}", f"commit: {first['commit']}"]
-    for figure in (figure_time, figure_speedup, figure_breakdown, figure_schedule, figure_sizes, figure_revalidate):
-        figure(runs, args.out, lines)
+    if runs:
+        for figure in (figure_time, figure_speedup, figure_breakdown, figure_schedule, figure_sizes,
+                       figure_revalidate):
+            figure(runs, args.out, lines)
+    if service:
+        for figure in (figure_serving, figure_scenes, figure_modes, figure_http):
+            figure(service, args.out, lines)
     (args.out / "summary.txt").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
 

@@ -4,6 +4,7 @@
 // Roadmap, Path and RNG) are the classes VAMP's own extension registers. Both extensions are built
 // with the same nanobind, so they share one type registry; import vamp before coven._core.
 
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -11,6 +12,7 @@
 #include <omp.h>
 
 #include <coven/pprm.hh>
+#include <coven/service.hh>
 #include <vamp/random/rng.hh>
 #include <vamp/robots/baxter.hh>
 #include <vamp/robots/fetch.hh>
@@ -41,6 +43,21 @@ namespace
         nb::capsule owner(copy, [](void *a) noexcept { delete[] reinterpret_cast<T *>(a); });
         return columns == 1 ? nb::ndarray<nb::numpy, T>(copy, {n}, owner) :
                               nb::ndarray<nb::numpy, T>(copy, {n, columns}, owner);
+    }
+
+    auto status_name(coven::PlanStatus status) -> const char *
+    {
+        switch (status)
+        {
+            case coven::PlanStatus::ok:
+                return "ok";
+            case coven::PlanStatus::unknown_scene:
+                return "unknown_scene";
+            case coven::PlanStatus::overloaded:
+                return "overloaded";
+            default:
+                return "shut_down";
+        }
     }
 
     template <typename Robot>
@@ -150,6 +167,106 @@ namespace
             "roadmap"_a,
             nb::rv_policy::move,
             "Vertices of a roadmap as an (n, dimension) numpy matrix.");
+
+        using Service = coven::Service<Robot, rake, Robot::resolution>;
+        using Reply = typename Service::Reply;
+
+        nb::class_<Reply>(m, "PlanReply", "Answer of Service.plan().")
+            .def_prop_ro(
+                "status",
+                [](const Reply &r) { return status_name(r.status); },
+                "'ok', 'unknown_scene', 'overloaded' or 'shut_down'.")
+            .def_prop_ro(
+                "path", [](const Reply &r) { return r.path; }, "Start, roadmap vertices, goal; empty if none.")
+            .def_ro("version", &Reply::version, "Scene version the path is collision-free in.")
+            .def_prop_ro("rounds", [](const Reply &r) { return r.counters.rounds; })
+            .def_prop_ro("checks", [](const Reply &r) { return r.counters.checks; })
+            .def_prop_ro("searches", [](const Reply &r) { return r.counters.searches; })
+            .def_prop_ro("fallback", [](const Reply &r) { return r.counters.fallback; })
+            .def_prop_ro("queued_seconds", [](const Reply &r) { return r.counters.queued_seconds; })
+            .def_prop_ro("total_seconds", [](const Reply &r) { return r.counters.total_seconds; });
+
+        nb::class_<Service>(
+            m,
+            "Service",
+            "Planning service: one roadmap, named scenes, and concurrent plan requests whose collision "
+            "checks are batched across requests. Thread-safe; every method releases the GIL while it waits.")
+            .def(
+                "__init__",
+                [](Service *self,
+                   const Roadmap &roadmap,
+                   int threads,
+                   std::int64_t window_us,
+                   bool eager,
+                   std::size_t max_in_flight)
+                {
+                    coven::ServiceOptions options;
+                    options.threads = threads > 0 ? threads : omp_get_max_threads();
+                    options.window = std::chrono::microseconds(window_us);
+                    options.eager = eager;
+                    options.max_in_flight = max_in_flight;
+                    new (self) Service(roadmap, options);
+                },
+                "roadmap"_a,
+                "threads"_a = 0,
+                "window_us"_a = 0,
+                "eager"_a = false,
+                "max_in_flight"_a = 65536,
+                "threads=0 uses max_threads().")
+            .def(
+                "set_scene",
+                [](Service &service, std::string id, const EnvironmentInput &environment)
+                {
+                    EnvironmentVector environment_v(environment);
+                    nb::gil_scoped_release release;
+                    return service.set_scene(std::move(id), std::move(environment_v)).get();
+                },
+                "id"_a,
+                "environment"_a,
+                "Create or replace a scene. Returns its new version.")
+            .def(
+                "erase_scene",
+                [](Service &service, std::string id)
+                {
+                    nb::gil_scoped_release release;
+                    return service.erase_scene(std::move(id)).get();
+                },
+                "id"_a,
+                "Remove a scene. False if there was none.")
+            .def(
+                "plan",
+                [configuration](Service &service, std::string scene, const Input &start, const Input &goal)
+                {
+                    const auto start_v = configuration(start);
+                    const auto goal_v = configuration(goal);
+                    nb::gil_scoped_release release;
+                    return service.plan(std::move(scene), start_v, goal_v).get();
+                },
+                "scene"_a,
+                "start"_a,
+                "goal"_a,
+                "Plan from start to goal in a scene; blocks until the answer.")
+            .def(
+                "stats",
+                [](const Service &service)
+                {
+                    const auto stats = service.stats();
+                    const auto &options = service.options();
+                    nb::dict result;
+                    result["requests"] = stats.requests;
+                    result["updates"] = stats.updates;
+                    result["rounds"] = stats.rounds;
+                    result["checks"] = stats.checks;
+                    result["update_seconds"] = stats.update_seconds;
+                    result["search_seconds"] = stats.search_seconds;
+                    result["check_seconds"] = stats.check_seconds;
+                    result["threads"] = options.threads;
+                    result["window_us"] = options.window.count();
+                    result["eager"] = options.eager;
+                    result["vertices"] = service.roadmap().vertices.size();
+                    return result;
+                },
+                "Totals since the service started, and its options.");
     }
 }  // namespace
 

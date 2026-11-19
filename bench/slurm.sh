@@ -8,14 +8,16 @@
 # one sweep per job, with the partition and the compiler modules of your cluster:
 #
 #   mkdir -p bench/results
-#   MODULES="gcc cmake" sbatch -p <partition> bench/slurm.sh <scaling|sizes|revalidate|quick>
+#   MODULES="gcc cmake" sbatch -p <partition> bench/slurm.sh <scaling|sizes|revalidate|service|quick>
+#
+# service-http also needs the Python package (pip install .) in the job's environment.
 #
 # -c counts hardware threads. The sweeps run one thread per physical core, so on nodes with two
 # hardware threads per core the default -c 32 gives 16 threads. The job does not ask for an
 # exclusive node; add --dependency=singleton to run your jobs one at a time.
 set -euo pipefail
 
-sweep=${1:?usage: sbatch bench/slurm.sh <scaling|sizes|revalidate|quick>}
+sweep=${1:?usage: sbatch bench/slurm.sh <scaling|sizes|revalidate|service|service-http|quick>}
 
 # Toolchain: GCC 11 or newer and CMake 3.16 or newer
 if [ -n "${MODULES:-}" ]; then
@@ -34,7 +36,7 @@ fi
 # once on the login node; the job then reuses the downloaded sources.
 export CPM_SOURCE_CACHE=$HOME/.cache/CPM
 cmake -S . -B build/slurm -DCMAKE_BUILD_TYPE=Release
-cmake --build build/slurm --target coven_bench -j "$SLURM_CPUS_PER_TASK"
+cmake --build build/slurm --target coven_bench coven_load -j "$SLURM_CPUS_PER_TASK"
 
 lscpu | grep -E "Model name|Socket|Core|Thread|NUMA node\(s\)"
 

@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # Run one benchmark sweep and append its rows to a CSV file.
 #
-#   bench/sweep.sh <scaling|sizes|revalidate|quick> <path to coven_bench> <out.csv>
+#   bench/sweep.sh <sweep> <path to coven_bench> <out.csv>
 #
-# scaling     threads x environment, and threads x schedule       (figures 1, 2, 3)
-# sizes       batch size x roadmap size at the full thread count  (figure 4)
-# revalidate  full recheck of a roadmap, threads x roadmap size, and threads x schedule (figure 5)
-# quick       a few small runs of every kind, to test the pipeline
+# scaling       threads x environment, and threads x schedule       (figures 1, 2, 3)
+# sizes         batch size x roadmap size at the full thread count  (figure 4)
+# revalidate    full recheck of a roadmap, threads x roadmap size, and threads x schedule (figure 5)
+# service       planning service load tests with coven_load (next to coven_bench)  (figures 6, 7, 8)
+# service-http  the same service over HTTP with bench/load.py, and in process     (figure 9)
+#               (needs the Python package installed: pip install .)
+# quick         a few small runs of every kind, to test the pipeline
 #
 # The thread counts are 1, 2, 4, ... up to the cores of the Slurm allocation (or of this machine).
 # REPEATS sets the timed runs per configuration (default 20); each configuration adds one warm-up.
+# DURATION sets the measured seconds of each load test (default 3), after one second of warm-up.
 set -euo pipefail
 
 sweep=$1
@@ -37,12 +41,25 @@ here=$(cd "$(dirname "$0")" && pwd)
 commit=$(git -C "$here" rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 mkdir -p "$(dirname "$out")"
-[ -s "$out" ] || "$bench" --header --mode serial --nodes 10 --repeats 0 --warmup 0 > "$out"
+load=$(dirname "$bench")/coven_load
+case $sweep in
+service*) [ -s "$out" ] || "$load" --header > "$out" ;;
+*) [ -s "$out" ] || "$bench" --header --mode serial --nodes 10 --repeats 0 --warmup 0 > "$out" ;;
+esac
 
 run() {
     echo "coven_bench $*" >&2
     "$bench" --commit "$commit" "$@" >> "$out"
 }
+
+# The service's threads are not pinned: the load generator and the scene updater share the cores
+duration=${DURATION:-3}
+load_run() {
+    echo "coven_load $*" >&2
+    env -u OMP_PROC_BIND -u OMP_PLACES "$load" --commit "$commit" --duration "$duration" --warmup 1 "$@" >> "$out"
+}
+
+rates="100 300 1000 3000 10000 30000"
 
 case $sweep in
 scaling)
@@ -86,6 +103,58 @@ revalidate)
         done
     done
     ;;
+service)
+    # Latency against throughput, by batching window (lazy, one scene moving every second)
+    for window in 0 250 1000 4000; do
+        for rate in $rates; do
+            load_run --threads "$cores" --window-us "$window" --update-ms 1000 --rate "$rate"
+        done
+    done
+    # One shared scene against 16 separate ones, by thread count, lazy and eager
+    for mode in lazy eager; do
+        for t in $(printf '%s\n' 1 4 "$cores" | sort -nu); do
+            for scenes in 1 16; do
+                [ "$t" = "$cores" ] && [ "$scenes" = 1 ] && continue  # run below
+                for rate in $rates; do
+                    load_run --mode "$mode" --threads "$t" --scenes "$scenes" --update-ms 1000 --rate "$rate"
+                done
+            done
+        done
+    done
+    # Lazy against eager checking, by how often the obstacles move (0: never)
+    for mode in lazy eager; do
+        for update in 10 100 1000 0; do
+            [ "$mode" = lazy ] && [ "$update" = 1000 ] && continue
+            for rate in $rates; do
+                load_run --threads "$cores" --mode "$mode" --update-ms "$update" --rate "$rate"
+            done
+        done
+    done
+    ;;
+service-http)
+    port=${PORT:-$((20000 + RANDOM % 20000))}
+    env -u OMP_PROC_BIND -u OMP_PLACES coven-server --nodes 10000 --threads "$cores" --port "$port" >&2 &
+    server=$!
+    trap 'kill $server 2>/dev/null' EXIT
+    ready=0
+    for _ in $(seq 120); do
+        if python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:$port/stats')" 2>/dev/null; then
+            ready=1
+            break
+        fi
+        sleep 1
+    done
+    if [ "$ready" = 0 ]; then
+        echo "coven-server did not start" >&2
+        exit 1
+    fi
+    for rate in 100 300 1000 3000; do
+        echo "load.py --rate $rate" >&2
+        python "$here/load.py" --url "http://127.0.0.1:$port" --rate "$rate" --update-ms 1000 \
+            --duration "$duration" --commit "$commit" >> "$out"
+        load_run --threads "$cores" --update-ms 1000 --rate "$rate"
+    done
+    ;;
 quick)
     run --mode serial --nodes 2000 --repeats 3
     for t in "${threads[@]}"; do
@@ -99,6 +168,9 @@ quick)
             run --mode parallel --nodes "$nodes" --threads "$cores" --batch "$batch" --repeats 3
         done
     done
+    # One short load test of the service, printed rather than written (its columns differ)
+    env -u OMP_PROC_BIND -u OMP_PLACES "$load" --threads "$cores" --nodes 2000 --rate 300 --duration 1 \
+        --warmup 0.5 >&2
     ;;
 *)
     echo "unknown sweep: $sweep" >&2

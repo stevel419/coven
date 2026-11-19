@@ -60,6 +60,7 @@ namespace coven
         using Pair = std::array<std::uint32_t, 2>;
 
         std::vector<Pair> edges;             // {i, j} with i < j
+        std::vector<float> lengths;          // configuration-space length of each edge
         std::vector<std::uint32_t> offsets;  // adjacency of vertex v is [offsets[v], offsets[v + 1])
         std::vector<Pair> adjacency;         // {neighbor vertex, edge index}
     };
@@ -353,12 +354,14 @@ namespace coven
 
             std::partial_sum(result.offsets.begin(), result.offsets.end(), result.offsets.begin());
             result.adjacency.resize(2 * result.edges.size());
+            result.lengths.resize(result.edges.size());
             auto cursor = result.offsets;
             for (std::uint32_t e = 0; e < result.edges.size(); ++e)
             {
                 const auto [i, j] = result.edges[e];
                 result.adjacency[cursor[i]++] = {j, e};
                 result.adjacency[cursor[j]++] = {i, e};
+                result.lengths[e] = roadmap.vertices[i].distance(roadmap.vertices[j]);
             }
 
             return result;
@@ -398,6 +401,42 @@ namespace coven
             return validity;
         }
 
+        using Link = std::pair<float, std::uint32_t>;  // {distance or cost, vertex}
+
+        // A way through the roadmap: its vertices from the start side to the goal side, and the
+        // RoadmapGraph edge between each pair of consecutive vertices (edges[i] joins vertices[i] and
+        // vertices[i + 1]). No vertices when there is none.
+        struct Route
+        {
+            std::vector<std::uint32_t> vertices;
+            std::vector<std::uint32_t> edges;
+        };
+
+        // The k vertices nearest to q among those for which usable(v) holds, nearest first.
+        // ponytail: linear scan over all vertices; index them in a kd-tree if queries on very large
+        // roadmaps become the bottleneck.
+        template <typename Usable>
+        inline static auto nearest(
+            const vamp::planning::Roadmap<Robot> &roadmap,
+            const Configuration &q,
+            std::size_t k,
+            const Usable &usable) -> std::vector<Link>
+        {
+            std::vector<Link> result;
+            for (std::uint32_t v = 0; v < roadmap.vertices.size(); ++v)
+            {
+                if (usable(v))
+                {
+                    result.emplace_back(q.distance(roadmap.vertices[v]), v);
+                }
+            }
+
+            const auto keep = std::min(k, result.size());
+            std::partial_sort(result.begin(), result.begin() + keep, result.end());
+            result.resize(keep);
+            return result;
+        }
+
         // Shortest path over the valid part of a roadmap. Start and goal are each joined to the
         // nearest valid vertices they can reach with a valid motion. Empty path when there is none.
         inline static auto query(
@@ -409,8 +448,6 @@ namespace coven
             const Environment &environment,
             std::size_t max_connections = 8) -> vamp::planning::Path<Robot>
         {
-            using Link = std::pair<float, std::uint32_t>;  // {distance or cost, vertex}
-
             vamp::planning::Path<Robot> path;
             if (vamp::planning::validate_motion<Robot, rake, resolution>(start, goal, environment))
             {
@@ -419,37 +456,24 @@ namespace coven
                 return path;
             }
 
-            const std::size_t n = roadmap.vertices.size();
-
-            // ponytail: linear scan over all vertices per query; index the vertices in a kd-tree if
-            // queries on very large roadmaps become the bottleneck.
             const auto connect = [&](const Configuration &q, bool from_q) -> std::vector<Link>
             {
-                std::vector<Link> nearest;
-                for (std::uint32_t v = 0; v < n; ++v)
-                {
-                    if (validity.vertices[v])
-                    {
-                        nearest.emplace_back(q.distance(roadmap.vertices[v]), v);
-                    }
-                }
-
-                const auto keep = std::min(max_connections, nearest.size());
-                std::partial_sort(nearest.begin(), nearest.begin() + keep, nearest.end());
-                nearest.resize(keep);
-
-                std::vector<Link> links;
-                for (const auto &link : nearest)
-                {
-                    const auto &vertex = roadmap.vertices[link.second];
-                    if (from_q ?
-                            vamp::planning::validate_motion<Robot, rake, resolution>(q, vertex, environment) :
-                            vamp::planning::validate_motion<Robot, rake, resolution>(vertex, q, environment))
-                    {
-                        links.emplace_back(link);
-                    }
-                }
-
+                auto links = nearest(
+                    roadmap, q, max_connections, [&](std::uint32_t v) { return validity.vertices[v] != 0; });
+                links.erase(
+                    std::remove_if(
+                        links.begin(),
+                        links.end(),
+                        [&](const Link &link)
+                        {
+                            const auto &vertex = roadmap.vertices[link.second];
+                            return not(
+                                from_q ? vamp::planning::validate_motion<Robot, rake, resolution>(
+                                             q, vertex, environment) :
+                                         vamp::planning::validate_motion<Robot, rake, resolution>(
+                                             vertex, q, environment));
+                        }),
+                    links.end());
                 return links;
             };
 
@@ -460,10 +484,42 @@ namespace coven
                 return path;
             }
 
-            // A* with the goal as virtual vertex n
+            const auto route =
+                search(roadmap, graph, starts, goals, goal, [&](std::uint32_t e) { return validity.edges[e] != 0; });
+            if (route.vertices.empty())
+            {
+                return path;
+            }
+
+            path.emplace_back(start);
+            for (const auto v : route.vertices)
+            {
+                path.emplace_back(roadmap.vertices[v]);
+            }
+
+            path.emplace_back(goal);
+            return path;
+        }
+
+        // A* from the start, entering the roadmap through `starts` ({distance, vertex}), to the goal,
+        // leaving it through `goals`, over the edges e for which passable(e) holds.
+        template <typename Passable>
+        inline static auto search(
+            const vamp::planning::Roadmap<Robot> &roadmap,
+            const RoadmapGraph &graph,
+            const std::vector<Link> &starts,
+            const std::vector<Link> &goals,
+            const Configuration &goal,
+            const Passable &passable) -> Route
+        {
+            Route route;
+            const std::size_t n = roadmap.vertices.size();
+
+            // The goal is virtual vertex n
             constexpr auto none = std::numeric_limits<std::uint32_t>::max();
             std::vector<float> cost(n + 1, std::numeric_limits<float>::infinity());
             std::vector<std::uint32_t> parent(n + 1, none);
+            std::vector<std::uint32_t> parent_edge(n + 1, none);
             std::vector<char> closed(n + 1, 0);
             std::vector<float> to_goal(n, std::numeric_limits<float>::infinity());
             for (const auto &[distance, v] : goals)
@@ -471,19 +527,33 @@ namespace coven
                 to_goal[v] = distance;
             }
 
+            // Distance to the goal, computed once per vertex
+            std::vector<float> heuristics(n, -1.F);
+            const auto heuristic = [&](std::uint32_t v)
+            {
+                if (heuristics[v] < 0.F)
+                {
+                    heuristics[v] = roadmap.vertices[v].distance(goal);
+                }
+
+                return heuristics[v];
+            };
+
             std::priority_queue<Link, std::vector<Link>, std::greater<Link>> open;
             for (const auto &[distance, v] : starts)
             {
                 cost[v] = distance;
-                open.emplace(distance + roadmap.vertices[v].distance(goal), v);
+                open.emplace(distance + heuristic(v), v);
             }
 
-            const auto relax = [&](std::uint32_t from, std::uint32_t to, float length, float heuristic)
+            const auto relax =
+                [&](std::uint32_t from, std::uint32_t to, std::uint32_t edge, float length, float heuristic)
             {
                 if (cost[from] + length < cost[to])
                 {
                     cost[to] = cost[from] + length;
                     parent[to] = from;
+                    parent_edge[to] = edge;
                     open.emplace(cost[to] + heuristic, to);
                 }
             };
@@ -505,37 +575,37 @@ namespace coven
                 closed[current] = 1;
                 if (to_goal[current] < std::numeric_limits<float>::infinity())
                 {
-                    relax(current, n, to_goal[current], 0.F);
+                    relax(current, n, none, to_goal[current], 0.F);
                 }
 
                 for (auto a = graph.offsets[current]; a < graph.offsets[current + 1]; ++a)
                 {
                     const auto [neighbor, edge] = graph.adjacency[a];
-                    if (validity.edges[edge] and not closed[neighbor])
+                    if (not closed[neighbor] and cost[current] + graph.lengths[edge] < cost[neighbor] and
+                        passable(edge))
                     {
-                        relax(
-                            current,
-                            neighbor,
-                            roadmap.vertices[current].distance(roadmap.vertices[neighbor]),
-                            roadmap.vertices[neighbor].distance(goal));
+                        relax(current, neighbor, edge, graph.lengths[edge], heuristic(neighbor));
                     }
                 }
             }
 
             if (parent[n] == none)
             {
-                return path;
+                return route;
             }
 
-            path.emplace_back(goal);
             for (auto v = parent[n]; v != none; v = parent[v])
             {
-                path.emplace_back(roadmap.vertices[v]);
+                route.vertices.push_back(v);
+                if (parent[v] != none)
+                {
+                    route.edges.push_back(parent_edge[v]);
+                }
             }
 
-            path.emplace_back(start);
-            std::reverse(path.begin(), path.end());
-            return path;
+            std::reverse(route.vertices.begin(), route.vertices.end());
+            std::reverse(route.edges.begin(), route.edges.end());
+            return route;
         }
     };
 }  // namespace coven

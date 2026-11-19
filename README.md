@@ -87,7 +87,7 @@ curl -X POST localhost:8000/scenes/cell/plan \
   found, the unchecked edges on all routes are checked in one parallel loop (once each, when routes
   share them), and the requests whose route is valid are answered.
 - **Lazy or eager.** By default only edges on candidate routes are checked (Lazy PRM). `--eager`
-  rechecks the whole roadmap on every scene change instead.
+  rechecks the whole roadmap on every scene change.
 
 API: [`coven/server.py`](coven/server.py). In C++: `coven::Service` in
 [`include/coven/service.hh`](include/coven/service.hh); in Python: `coven.panda.Service`.
@@ -101,8 +101,11 @@ API: [`coven/server.py`](coven/server.py). In C++: `coven::Service` in
 Each doubling of threads cuts the wall time by 40–49%. **Left**: speedup over VAMP's serial PRM. **Right**:
 speedup over one thread.
 
-Setup, per-environment results, OpenMP schedules, batch sizes and how to reproduce:
-[`bench/README.md`](bench/README.md).
+Planning service answers 10,000 requests per second with p99 latency under 40 ms (10,000-node
+roadmap, one scene moving every second).
+
+Setup, per-environment results, OpenMP schedules, batch sizes, planning service load tests and how
+to reproduce: [`bench/README.md`](bench/README.md).
 
 ## How it works
 

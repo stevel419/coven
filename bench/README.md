@@ -103,9 +103,67 @@ changes the roadmap. Compile with `COVEN_SCHEDULE=runtime` to choose it with `OM
   a slow service cannot slow its own load.
 - **Timing:** one second of warm-up, then 3 s measured; at most 4,096 requests in flight, more are
   refused.
-- **Capacity:** the highest throughput served with p99 latency at most 100 ms and nothing refused.
+- **Rates:** 100, 300, 1,000, 3,000, 10,000 and 30,000 requests per second.
+- **Capacity:** the highest tested rate served with p99 latency at most 100 ms and nothing refused.
+  The steps are coarse, so 10,000 means "between 10,000 and 30,000".
+- **Saturated throughput:** requests answered per second when 30,000 per second are offered.
 
-[`load.py`](load.py) runs the same test over HTTP against `coven-server`.
+[`load.py`](load.py) runs the same test over HTTP against `coven-server`. Coven `00df383`.
+
+### Batching window
+
+![Latency against throughput, by batching window](results/figures/6_serving.png)
+
+Lazy, one scene moving every second, 16 threads. Up to 10,000 requests per second the p50 stays at
+0.4–3 ms and the p99 under 40 ms. Waiting for a batch to fill never helps: when the service is busy,
+new requests join the next round anyway, and when it is idle the wait only adds latency (p50 at 100
+requests/s: 0.4 ms with no window, 4.5 ms with 4 ms). The default window is 0. At 30,000 offered the
+service saturates at 18,400–19,100 requests per second.
+
+### Threads and scenes
+
+![Capacity by thread count](results/figures/7_scenes.png)
+
+Scenes moving every second:
+
+| | 1 thread | 4 threads | 16 threads | Saturated, 16 threads |
+|---|---|---|---|---|
+| Lazy, 1 shared scene | 313 | 3,036 | 9,915 | 18,762 |
+| Lazy, 16 separate scenes | 0 | 309 | 1,043 | 7,752 |
+| Eager, 1 shared scene | 2,979 | 9,920 | 9,963 | 21,465 |
+| Eager, 16 separate scenes | 0 | 0 | 0 | 14,869 |
+
+Capacity in requests per second. Lazy saturated throughput grows 15× from 1 to 16 threads. Separate
+scenes share no checks: each request in a fresh scene version finds its blocked edges on its own,
+which takes 3.5–10 rounds instead of 2.3–3 in a shared scene. Eager with 16 scenes has p50 under 5 ms but p99 of 160–350 ms:
+all 16 scenes move at the same moment, and the 16 rechecks run back to back while requests wait.
+
+### Lazy against eager
+
+![Lazy against eager checking](results/figures/8_modes.png)
+
+One scene, 16 threads:
+
+| Obstacles move | Lazy capacity | Eager capacity | Lazy p50 at 100/s | Eager p50 at 100/s |
+|---|---|---|---|---|
+| every 10 ms | 306 | 9,871 | 1.7 ms | 30.7 ms |
+| every 100 ms | 9,755 | 9,965 | 1.4 ms | 0.4 ms |
+| every second | 9,915 | 9,963 | 0.4 ms | 0.4 ms |
+| never | 9,995 | 9,999 | 0.4 ms | 0.4 ms |
+
+- **Eager** rechecks the whole roadmap on every change, about 14 ms here. Requests then need no edge
+  checks, but a recheck can run before each of their two rounds: when the scene changes every 10 ms,
+  the dispatcher is rechecking 82–96% of the time up to 3,000 requests per second, and the median
+  request takes 31 ms.
+- **Lazy** checks only edges on candidate routes, so requests rarely wait behind anything, but the
+  first requests after each change know nothing yet and take 4–5 rounds. When the scene changes
+  every 10 ms, most requests are such requests, and the p99 passes 100 ms between 300 and 1,000
+  requests per second.
+- From one change per 100 ms on, both serve 10,000 requests per second within 100 ms p99.
+
+At saturation with 16 threads and one scene, the dispatcher spends 23–34% of its time searching and
+9–14% checking. Most of the rest goes to taking requests in, where each finds its 8 nearest valid
+vertices by a serial scan of the roadmap, and to answering them.
 
 ## Reproduce
 

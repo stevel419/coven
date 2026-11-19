@@ -455,10 +455,10 @@ def figure_modes(rows, out, lines):
         lines.append(f"  {mode}: " + "  ".join(
             f"update {u or 'never'}: capacity {c:.0f}/s, p50 at {low_rate:.0f}/s {m:.1f} ms"
             for u, c, m in zip(updates, caps, medians)))
-    names = [("every second" if u == 1000 else f"every {u} ms") if u else "never" for u in updates]
+    names = [("1 s" if u == 1000 else f"{u} ms") if u else "never" for u in updates]
     for ax in (left, right):
         ax.set_xticks(list(x), names)
-        ax.set_xlabel("obstacles move")
+        ax.set_xlabel("obstacles move every")
         ax.grid(axis="x", visible=False)
     left.set_title(f"Capacity (requests/s, p99 ≤ {SLO_MS} ms)")
     right.set_title(f"Median latency at {low_rate:.0f} requests/s (ms)")

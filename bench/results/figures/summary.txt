@@ -2,6 +2,11 @@ cpu: AMD EPYC 9254 24-Core Processor
 compiler: gcc 13.2.0
 commit: e24845b
 
+Figure 0: wall time per thread count, ms (speedup)
+  Build a 10,000-node roadmap: 1t 1168.2 (0.99x)  2t 603.7 (1.91x)  4t 312.3 (3.68x)  8t 172.7 (6.66x)  16t 103.7 (11.09x)
+  Recheck a 20,000-node roadmap after obstacles move: 1t 1609.1 (1.00x)  2t 817.3 (1.97x)  4t 414.9 (3.88x)  8t 227.1 (7.09x)  16t 117.5 (13.70x)
+wrote 0_time.png
+
 Figure 1: speedup over unmodified serial PRM, 10000 nodes, batch 1024
   cage: serial 1150.7 ms, serial share 3.11%
       1 threads:    1168.2 ms (IQR 1167.7-1168.4)  speedup  0.99x  vs one thread  1.00x  efficiency  98.5%  Amdahl  0.99x

@@ -2,7 +2,7 @@
 
     python bench/plot.py bench/results/*.csv --out bench/results/figures
 
-Writes five PNG files and summary.txt (the numbers behind the figures) into the output directory.
+Writes six PNG files and summary.txt (the numbers behind the figures) into the output directory.
 Runs of the same configuration from several files are pooled. A figure is skipped, with a message,
 when the CSV files do not contain the sweep it needs.
 """
@@ -99,6 +99,52 @@ def thread_axis(ax, threads):
     ax.set_xlabel("threads")
 
 
+def figure_time(runs, out, lines):
+    # Wall time per thread count: construction against VAMP's serial PRM, revalidation against one thread
+    panels = []
+    groups = [g for g in most_threads(runs, mode="parallel", schedule=DEFAULT_SCHEDULE)
+              if ("serial", g[0], g[1], 0, 1, "") in runs]
+    if groups:
+        env, nodes, batch = next((g for g in groups if g[0] == "cage"), groups[0])
+        by_threads = {k[4]: v for k, v in select(
+            runs, mode="parallel", env=env, nodes=nodes, batch=batch, schedule=DEFAULT_SCHEDULE).items()}
+        panels.append((f"Build a {nodes:,}-node roadmap", by_threads,
+                       med(runs[("serial", env, nodes, 0, 1, "")]), "VAMP serial PRM"))
+    by_size = defaultdict(dict)
+    for key, rows in select(runs, mode="revalidate", schedule=RECHECK_SCHEDULE).items():
+        by_size[key[2]][key[4]] = rows
+    if by_size:
+        nodes = sorted(by_size)[len(by_size) // 2]
+        by_threads = by_size[nodes]
+        panels.append((f"Recheck a {nodes:,}-node roadmap after obstacles move", by_threads,
+                       med(by_threads[min(by_threads)]), None))
+    if not panels:
+        return lines.append("figure 0 skipped: no scaling or revalidation sweep")
+
+    fig, axes = plt.subplots(1, len(panels), figsize=(5.2 * len(panels), 3.6), squeeze=False)
+    lines.append("\nFigure 0: wall time per thread count, ms (speedup)")
+    for ax, (title, by_threads, base, base_label) in zip(axes[0], panels):
+        threads = sorted(by_threads)
+        ms = [med(by_threads[t]) / 1e6 for t in threads]
+        x = range(len(threads))
+        ax.bar(x, ms, 0.6, color=SERIES[0])
+        for i, (t, m) in enumerate(zip(threads, ms)):
+            ax.annotate(f"{m:,.0f} ms\n{base / 1e6 / m:.1f}x", (i, m), xytext=(0, 3), textcoords="offset points",
+                        ha="center", va="bottom", fontsize=9, color=TEXT)
+        if base_label:
+            ax.axhline(base / 1e6, color=MUTED, linewidth=1.2, linestyle="--")
+            ax.annotate(f"{base_label}: {base / 1e6:,.0f} ms", (len(threads) - 0.6, base / 1e6), xytext=(0, 4),
+                        textcoords="offset points", ha="right", va="bottom", fontsize=9, color=MUTED)
+        ax.set_ylim(0, max(ms + [base / 1e6]) * 1.22)
+        ax.set_xticks(x, [str(t) for t in threads])
+        ax.set_xlabel("threads")
+        ax.set_ylabel("wall time (ms)")
+        ax.grid(axis="x", visible=False)
+        ax.set_title(title)
+        lines.append(f"  {title}: " + "  ".join(f"{t}t {m:.1f} ({base / 1e6 / m:.2f}x)" for t, m in zip(threads, ms)))
+    save(fig, out, "0_time.png", lines)
+
+
 def figure_speedup(runs, out, lines):
     groups = [g for g in most_threads(runs, mode="parallel", schedule=DEFAULT_SCHEDULE)
               if ("serial", g[0], g[1], 0, 1, "") in runs]
@@ -167,8 +213,13 @@ def figure_breakdown(runs, out, lines):
         bottom = [0.0] * len(threads)
         for (name, label), color in zip(PHASES, SERIES):
             height = [parts[t][name] * (100 / sum(parts[t].values()) if relative else 1) for t in threads]
-            ax.bar(x, height, 0.5, bottom=bottom, color=color, edgecolor=SURFACE, linewidth=1.5, label=label)
+            # Thin gaps: wider ones hide the few-ms segments on the absolute scale
+            ax.bar(x, height, 0.5, bottom=bottom, color=color, edgecolor=SURFACE, linewidth=0.5, label=label)
             bottom = [b + h for b, h in zip(bottom, height)]
+        if not relative:
+            for i, total in enumerate(bottom):
+                ax.annotate(f"{total:,.0f}", (i, total), xytext=(0, 3), textcoords="offset points", ha="center",
+                            va="bottom", fontsize=9, color=TEXT)
         ax.set_xticks(x, [str(t) for t in threads])
         ax.set_xlabel("threads")
         ax.grid(axis="x", visible=False)
@@ -308,7 +359,7 @@ def main():
 
     first = next(iter(runs.values()))[0]
     lines = [f"cpu: {first['cpu']}", f"compiler: {first['compiler']}", f"commit: {first['commit']}"]
-    for figure in (figure_speedup, figure_breakdown, figure_schedule, figure_sizes, figure_revalidate):
+    for figure in (figure_time, figure_speedup, figure_breakdown, figure_schedule, figure_sizes, figure_revalidate):
         figure(runs, args.out, lines)
     (args.out / "summary.txt").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))

@@ -176,7 +176,94 @@ MODULES="gcc cmake" sbatch -p <partition> --dependency=singleton bench/slurm.sh 
 
 ## Results
 
-Pending.
+| | |
+|---|---|
+| CPU | 2 × AMD EPYC 9254 (Zen 4, 24 cores per socket, 2 hardware threads per core), shared node |
+| Threads | Up to 16, one per physical core; the second hardware thread of each core is idle |
+| Compiler | GCC 13.2.0, `-O3 -march=native -flto` (VAMP's Release settings) |
+| Code | VAMP `27cb9b6`; Coven `e24845b` for construction, `f31279b` for revalidation (same construction code) |
+
+Every job first checked that the parallel roadmap equals the serial one on that machine (5,000
+vertices, 63,283 edges). The CSV files are in [`bench/results/`](bench/results).
+
+### Roadmap construction
+
+![Speedup over serial PRM](bench/results/figures/1_speedup.png)
+
+10,000 nodes, batch size 1024:
+
+| Environment | Serial PRM | Coven, 1 thread | Coven, 16 threads | Speedup | Efficiency |
+|---|---|---|---|---|---|
+| `empty` | 1304.4 ms | 1317.2 ms | 114.3 ms | 11.4× | 71% |
+| `cage` | 1150.7 ms | 1168.2 ms | 103.7 ms | 11.1× | 69% |
+| `spheres64` | 1440.4 ms | 1473.8 ms | 124.8 ms | 11.5× | 72% |
+
+Batching costs 1.0–2.3% on one thread. The Amdahl line treats edge validation and neighbor search as
+perfectly parallel and the rest of the one-thread run (sampling, insertion and bookkeeping, 1.6–3.1%)
+as serial.
+
+![Time per phase](bench/results/figures/2_breakdown.png)
+
+| Phase (`cage`) | 1 thread | 16 threads | Scaling |
+|---|---|---|---|
+| Edge validation | 1032.6 ms | 73.3 ms | 14.1× |
+| Neighbor search | 99.2 ms | 13.7 ms | 7.2× |
+| Sampling | 26.6 ms | 7.1 ms | 3.7× |
+| Insertion (serial) | 7.7 ms | 7.6 ms | — |
+
+Edge validation drops from 88% of the time on one thread to 71% on 16. What limits the speedup is
+the rest: neighbor search, sampling, the serial insertion and bookkeeping take 30 ms of the 104 ms
+at 16 threads.
+
+### OpenMP schedule
+
+![Speedup by schedule](bench/results/figures/3_schedule.png)
+
+At 16 threads (in the right panel, `guided` and `static` overlap):
+
+| Schedule | Construction, speedup over serial PRM | Revalidation, million edges per second |
+|---|---|---|
+| `dynamic` (chunk 1) | 10.64× | 3.07 |
+| `dynamic`, chunk 16 | 10.81× | 3.23 |
+| `guided` | **11.09×** | 2.50 |
+| `static` | 7.95× | 2.50 |
+
+Construction checks the edges of one batch per loop, about 26,000 at a time, and `guided` is the
+fastest there. Revalidation checks every edge of the roadmap in one loop, and edge costs vary along
+it: an edge with a blocked vertex is skipped, and a colliding edge stops at the first collision.
+`guided` and `static` give each thread large blocks up front, so threads that draw cheap blocks wait
+for the rest. `dynamic` keeps the threads balanced and is 23% faster there. Coven uses `guided` for
+construction and `dynamic` for revalidation. `static` also suffers when another job on the shared
+node slows one core, since it cannot rebalance. The schedule never changes the roadmap.
+
+### Batch size
+
+![Speedup by batch size and roadmap size](bench/results/figures/4_sizes.png)
+
+16 threads, `cage`. Coven beats the serial planner at every size measured, down to 100 nodes. The
+default batch size, 1024, is the best from 5,000 nodes up and within 5% of the best below that.
+
+- **Small batches** leave little parallel work: with batch size 1, only one node's sample and edges
+  are checked at a time.
+- **Large batches** slow down neighbor search. A node is compared with the earlier nodes of its own
+  batch by a linear scan, which is O(B²) per batch. At 20,000 nodes, neighbor search grows from 30 ms
+  at batch 1024 to 411 ms at batch 16,384.
+
+### Revalidation
+
+![Revalidation rate](bench/results/figures/5_revalidate.png)
+
+A roadmap built in `cage` is rechecked, every vertex and every edge, after every obstacle moves 5 cm
+along x.
+
+| Roadmap | Edges | 1 thread | 16 threads | Speedup | Rechecks per second |
+|---|---|---|---|---|---|
+| 5,000 nodes | 63,283 | 338.3 ms | 24.3 ms | 13.9× | 41 |
+| 20,000 nodes | 360,438 | 1609.1 ms | 117.5 ms | 13.7× | 8.5 |
+| 100,000 nodes | 2,503,764 | 8966.7 ms | 680.9 ms | 13.2× | 1.5 |
+
+Revalidation is one parallel loop with no serial phase, so it scales better than construction. At
+16 threads it checks 2.6–3.7 million edges per second.
 
 ## Layout
 

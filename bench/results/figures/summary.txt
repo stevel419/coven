@@ -1,0 +1,78 @@
+cpu: AMD EPYC 9254 24-Core Processor
+compiler: gcc 13.2.0
+commit: e24845b
+
+Figure 1: speedup over unmodified serial PRM, 10000 nodes, batch 1024
+  cage: serial 1150.7 ms, serial share 3.11%
+      1 threads:    1168.2 ms (IQR 1167.7-1168.4)  speedup  0.99x  vs one thread  1.00x  efficiency  98.5%  Amdahl  0.99x
+      2 threads:     603.7 ms (IQR 603.2-604.3)  speedup  1.91x  vs one thread  1.94x  efficiency  95.3%  Amdahl  1.91x
+      4 threads:     312.3 ms (IQR 311.6-312.7)  speedup  3.68x  vs one thread  3.74x  efficiency  92.1%  Amdahl  3.60x
+      8 threads:     172.7 ms (IQR 172.5-173.0)  speedup  6.66x  vs one thread  6.76x  efficiency  83.3%  Amdahl  6.47x
+     16 threads:     103.7 ms (IQR 101.8-104.2)  speedup 11.09x  vs one thread 11.26x  efficiency  69.3%  Amdahl 10.74x
+  empty: serial 1304.4 ms, serial share 1.58%
+      1 threads:    1317.2 ms (IQR 1314.2-1318.3)  speedup  0.99x  vs one thread  1.00x  efficiency  99.0%  Amdahl  0.99x
+      2 threads:     683.1 ms (IQR 682.8-683.9)  speedup  1.91x  vs one thread  1.93x  efficiency  95.5%  Amdahl  1.95x
+      4 threads:     357.7 ms (IQR 357.2-358.4)  speedup  3.65x  vs one thread  3.68x  efficiency  91.2%  Amdahl  3.78x
+      8 threads:     191.9 ms (IQR 191.7-192.4)  speedup  6.80x  vs one thread  6.86x  efficiency  85.0%  Amdahl  7.13x
+     16 threads:     114.3 ms (IQR 113.5-114.7)  speedup 11.41x  vs one thread 11.52x  efficiency  71.3%  Amdahl 12.81x
+  spheres64: serial 1440.4 ms, serial share 1.89%
+      1 threads:    1473.8 ms (IQR 1472.6-1474.8)  speedup  0.98x  vs one thread  1.00x  efficiency  97.7%  Amdahl  0.98x
+      2 threads:     751.4 ms (IQR 750.8-752.6)  speedup  1.92x  vs one thread  1.96x  efficiency  95.8%  Amdahl  1.92x
+      4 threads:     384.4 ms (IQR 384.0-385.2)  speedup  3.75x  vs one thread  3.83x  efficiency  93.7%  Amdahl  3.70x
+      8 threads:     211.9 ms (IQR 211.2-212.2)  speedup  6.80x  vs one thread  6.95x  efficiency  85.0%  Amdahl  6.90x
+     16 threads:     124.8 ms (IQR 121.4-125.0)  speedup 11.54x  vs one thread 11.81x  efficiency  72.1%  Amdahl 12.18x
+wrote 1_speedup.png
+
+Figure 2: time breakdown in ms, cage, 10000 nodes, batch 1024
+  threads  edge validation  neighbor search         sampling        insertion            other
+        1           1032.6             99.2             26.6              7.7              2.1
+        2            526.6             52.5             15.3              7.2              2.1
+        4            266.5             28.0              9.6              6.2              2.1
+        8            138.5             18.0              7.5              6.9              1.8
+       16             73.3             13.7              7.1              7.6              2.0
+wrote 2_breakdown.png
+
+Figure 3: OpenMP schedule
+  construction, speedup over serial PRM, cage, 10000 nodes, batch 1024
+    dynamic      1t 0.98  2t 1.90  4t 3.67  8t 6.47  16t 10.64
+    dynamic,16   1t 0.98  2t 1.90  4t 3.69  8t 6.56  16t 10.81
+    guided       1t 0.99  2t 1.91  4t 3.68  8t 6.66  16t 11.09
+    static       1t 0.97  2t 1.81  4t 3.51  8t 6.48  16t 7.95
+  revalidation, million edges per second, cage, 20000 nodes
+    dynamic      1t 0.22  2t 0.44  4t 0.87  8t 1.59  16t 3.07
+    dynamic,16   1t 0.23  2t 0.45  4t 0.88  8t 1.58  16t 3.23
+    guided       1t 0.23  2t 0.41  4t 0.76  8t 1.37  16t 2.50
+    static       1t 0.23  2t 0.41  4t 0.75  8t 1.37  16t 2.50
+wrote 3_schedule.png
+
+Figure 4: speedup over serial PRM at 16 threads, cage (rows nodes, columns batch)
+  nodes          1      16      64     256    1024    4096   16384
+      100    1.61x   3.85x   5.43x   7.18x   6.85x   7.05x   7.05x
+      300    2.23x   4.82x   6.87x   8.83x   9.60x   9.96x   9.93x
+     1000    2.70x   5.45x   7.70x   9.91x   9.70x   9.53x   9.51x
+     5000    3.20x   5.99x   8.32x  10.47x  10.98x   7.45x   6.27x
+    20000    3.38x   5.96x   8.52x  10.57x  11.27x  10.43x   4.20x
+   100000    3.23x   5.52x   8.53x  10.71x  11.49x  11.45x   8.67x
+  crossover: Parallel wins from 100 nodes
+wrote 4_sizes.png
+
+Figure 5: full revalidation of a roadmap
+  cage 5000 nodes, 63283 edges
+      1 threads:    338.31 ms per recheck,   0.19 M edges/s,     3.0 rechecks/s
+      2 threads:    172.99 ms per recheck,   0.37 M edges/s,     5.8 rechecks/s
+      4 threads:     87.61 ms per recheck,   0.72 M edges/s,    11.4 rechecks/s
+      8 threads:     47.60 ms per recheck,   1.33 M edges/s,    21.0 rechecks/s
+     16 threads:     24.31 ms per recheck,   2.60 M edges/s,    41.1 rechecks/s
+  cage 20000 nodes, 360438 edges
+      1 threads:   1609.09 ms per recheck,   0.22 M edges/s,     0.6 rechecks/s
+      2 threads:    817.34 ms per recheck,   0.44 M edges/s,     1.2 rechecks/s
+      4 threads:    414.89 ms per recheck,   0.87 M edges/s,     2.4 rechecks/s
+      8 threads:    227.09 ms per recheck,   1.59 M edges/s,     4.4 rechecks/s
+     16 threads:    117.47 ms per recheck,   3.07 M edges/s,     8.5 rechecks/s
+  cage 100000 nodes, 2503764 edges
+      1 threads:   8966.65 ms per recheck,   0.28 M edges/s,     0.1 rechecks/s
+      2 threads:   4586.45 ms per recheck,   0.55 M edges/s,     0.2 rechecks/s
+      4 threads:   2367.84 ms per recheck,   1.06 M edges/s,     0.4 rechecks/s
+      8 threads:   1330.29 ms per recheck,   1.88 M edges/s,     0.8 rechecks/s
+     16 threads:    680.88 ms per recheck,   3.68 M edges/s,     1.5 rechecks/s
+wrote 5_revalidate.png

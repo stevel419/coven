@@ -4,8 +4,8 @@ Multi-core PRM roadmap construction and replanning built on [VAMP](https://githu
 
 ![Serial and parallel replanning side by side](demo/recording.gif)
 
-*Two Panda arms replan among moving obstacles on the same 5,000-node roadmap. Left: one thread.
-Right: 11 threads. The faster arm stops following blocked paths sooner.*
+*Two Panda arms replan among moving obstacles on the same 5,000-node roadmap. **Left**: one thread.
+**Right**: 11 threads. The faster arm stops following blocked paths sooner.*
 
 VAMP checks one edge fast with SIMD, but its PRM checks edges one after another on a single core.
 Coven checks them across all cores with OpenMP, and reuses the roadmap as obstacles move.
@@ -20,7 +20,7 @@ Coven checks them across all cores with OpenMP, and reuses the roadmap as obstac
 
 ## Quick start
 
-Requires Linux or WSL2 with an AVX2 CPU, GCC 11+ or Clang, CMake 3.16+ and Python 3.10+.
+- **Requirements**: Linux or WSL2 with an AVX2 CPU, GCC 11+ or Clang, CMake 3.16+ and Python 3.10+.
 
 ```bash
 git clone https://github.com/stevel419/coven.git && cd coven
@@ -75,25 +75,24 @@ Configurations are `float32` numpy arrays. Roadmaps and paths are VAMP's Python 
 
 ![Wall time by thread count](bench/results/figures/0_time.png)
 
-Each doubling of threads cuts the wall time by 40–49%. Left: speedup over VAMP's serial PRM. Right:
+Each doubling of threads cuts the wall time by 40–49%. **Left**: speedup over VAMP's serial PRM. **Right**:
 speedup over one thread.
-
-![Time per phase](bench/results/figures/2_breakdown.png)
-
-Edge validation, most of the work, scales 14×. Neighbor search, sampling and the serial insertion
-scale less, and limit construction to 11×.
 
 Setup, per-environment results, OpenMP schedules, batch sizes and how to reproduce:
 [`bench/README.md`](bench/README.md).
 
 ## How it works
 
-[`coven::PPRM`](include/coven/pprm.hh) builds the roadmap in batches: it checks a batch of samples in
-parallel, checks all their candidate edges in one OpenMP loop, then inserts them in the serial
-planner's order, so the roadmap matches VAMP's exactly. `revalidate()` rechecks every vertex and edge
-in parallel after the obstacles move, and `query()` runs A* over what is still valid. Threads can share
-the environment and neighbor tree because VAMP's collision checks and `nigh`'s `nearest()` only read
-them.
+[`coven::PPRM`](include/coven/pprm.hh) builds the roadmap in batches. For each batch it:
+
+- checks the samples in parallel;
+- checks all their candidate edges in one OpenMP loop;
+- inserts them in the serial planner's order, so the roadmap matches VAMP's exactly.
+
+After the obstacles move:
+
+- `revalidate()` rechecks every vertex and edge in parallel;
+- `query()` runs A* over what is still valid.
 
 ## Acknowledgements
 

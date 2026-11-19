@@ -115,8 +115,8 @@ python bench/plot.py bench/results/*.csv --out bench/results/figures
 - `REPEATS=5 bash bench/sweep.sh ...` shortens a sweep.
 - `plot.py` writes the figures and `summary.txt`.
 
-On a Slurm cluster, [`slurm.sh`](slurm.sh) builds on the compute node (so `-march=native` matches),
-runs the check, then one sweep:
+On a Slurm cluster, [`slurm.sh`](slurm.sh) builds on the compute node, runs the check, then one 
+sweep:
 
 ```bash
 mkdir -p bench/results

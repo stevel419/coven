@@ -63,7 +63,7 @@ namespace coven
         std::uint64_t rounds{0};    // batches run
         std::uint64_t checks{0};    // collision checks run in batches (motions, not scene updates)
         double update_seconds{0};   // dispatcher time spent on scene updates
-        double search_seconds{0};   // ... on route searches
+        double search_seconds{0};   // ... on nearest-vertex scans and route searches
         double check_seconds{0};    // ... on batched collision checks
     };
 
@@ -423,14 +423,6 @@ namespace coven
             request->work = std::move(work);
             request->scene = it->second;
             request->counters.queued_seconds = seconds(Clock::now() - request->work.arrival);
-
-            // Start and goal are tried against the nearest valid vertices, as in PPRM::query()
-            const auto &scene = *request->scene;
-            const auto usable = [&](std::uint32_t v) { return scene.vertices[v] == valid; };
-            request->starts = PPRM::nearest(roadmap_, request->work.start, options_.connections, usable);
-            request->goals = PPRM::nearest(roadmap_, request->work.goal, options_.connections, usable);
-            request->start_states.assign(request->starts.size(), unknown);
-            request->goal_states.assign(request->goals.size(), unknown);
             fresh_.push_back(request.get());
             active_.push_back(std::move(request));
             ++requests_;
@@ -475,7 +467,16 @@ namespace coven
             checks_round_.clear();
             parallel_ = true;
 
-            // New requests check the straight line and all their connections at once
+            // New requests connect start and goal to the nearest valid vertices, as in PPRM::query(),
+            // and check the straight line and all those connections at once
+            const auto begin = Clock::now();
+            const std::size_t n_fresh = fresh_.size();
+            COVEN_SERVICE_OMP(omp parallel for schedule(dynamic) if (n_fresh >= min_parallel_searches))
+            for (std::size_t i = 0; i < n_fresh; ++i)
+            {
+                connect(*fresh_[i]);
+            }
+
             for (auto *request : fresh_)
             {
                 add(*request, request->work.start, request->work.goal, request->direct);
@@ -495,7 +496,6 @@ namespace coven
             fresh_.clear();
 
             // Small rounds run on the dispatcher alone: waking the other threads costs more than the work
-            const auto begin = Clock::now();
             const std::size_t n_active = active_.size();
             COVEN_SERVICE_OMP(omp parallel for schedule(dynamic) if (n_active >= min_parallel_searches))
             for (std::size_t i = 0; i < n_active; ++i)
@@ -531,6 +531,17 @@ namespace coven
             checks_ += n_checks;
             check_ns_ += nanoseconds(Clock::now() - collected);
             active_.swap(waiting);
+        }
+
+        // Reads scene state, writes only the request
+        void connect(Request &request) const
+        {
+            const auto &scene = *request.scene;
+            const auto usable = [&](std::uint32_t v) { return scene.vertices[v] == valid; };
+            request.starts = PPRM::nearest(roadmap_, request.work.start, options_.connections, usable);
+            request.goals = PPRM::nearest(roadmap_, request.work.goal, options_.connections, usable);
+            request.start_states.assign(request.starts.size(), unknown);
+            request.goal_states.assign(request.goals.size(), unknown);
         }
 
         // Find a new shortest route through what is not known to be blocked, unless the current one is

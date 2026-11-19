@@ -44,6 +44,9 @@ Two properties of VAMP make this safe:
 - `nigh`'s `nearest()` is `const` and keeps its search state local, so threads can query the
   neighbor tree at once as long as nobody inserts. Step 2 relies on this; step 4 is the only writer.
 
+The collision-checking loops use OpenMP's `guided` schedule, the fastest in the benchmarks. Define
+`COVEN_SCHEDULE=runtime` when compiling to choose the schedule with `OMP_SCHEDULE` instead.
+
 ## Install
 
 Linux or WSL2 with an AVX2 CPU, GCC 11+ or Clang, CMake 3.16+ and Python 3.10+. VAMP itself is not
@@ -131,104 +134,48 @@ A lane that replans slowly follows older paths. You can also drag the obstacles 
 The arms do not dodge: an obstacle can still sweep into an arm, whatever the replan rate. The replan
 rate only changes how soon an arm stops following a path that is no longer free.
 
-## Tests
-
-| What is checked | Where |
-|---|---|
-| Parallel roadmap equals VAMP's serial roadmap: vertices, sorted edge set, iteration count and final sampler state. 5 seeds, 6 batch sizes, 2 environments, and the iteration limit | `tests/test_pprm.cc` |
-| Same roadmap with 1, 2, 4 and all threads, under `static`, `dynamic` and `guided` schedules | `tests/test_pprm.cc` |
-| Parallel edge checks equal serial checks of the same edges | `tests/test_pprm.cc` |
-| Revalidation after the obstacles move equals a serial recheck of every vertex and edge | `tests/test_pprm.cc`, `tests/test_replanner.py` |
-| Every returned path passes VAMP's validator, edge by edge | `tests/test_pprm.cc`, `tests/test_replanner.py` |
-| No data races in the `[race]` case under ThreadSanitizer | see below |
-
-GCC's OpenMP runtime is not instrumented, so ThreadSanitizer reports false races with it. Use Clang
-with LLVM's OpenMP runtime and its Archer tool:
-
-```bash
-cmake -S . -B build/tsan -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DVAMP_LTO=OFF \
-  -DCOVEN_BUILD_BENCH=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DCMAKE_CXX_FLAGS=-fsanitize=thread -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
-cmake --build build/tsan
-TSAN_OPTIONS=ignore_noninstrumented_modules=1 OMP_TOOL_LIBRARIES=/path/to/libarcher.so \
-  setarch x86_64 -R build/tsan/coven_tests "[race]"
-```
-
-`ignore_noninstrumented_modules=1` stops ThreadSanitizer from reporting the OpenMP runtime's own
-locking, which Archer accounts for. `setarch -R` works around a ThreadSanitizer start-up failure on
-recent kernels.
-
 ## Benchmarks
 
-`bench/bench.cc` builds `coven_bench`. It prints one CSV row per timed run with:
+`bench/bench.cc` builds `coven_bench`, which prints one CSV row per timed run: the configuration,
+wall time, time per phase (sampling, neighbor search, edge validation, insertion), edges checked,
+roadmap size, commit, compiler and CPU.
 
-- the configuration and wall time;
-- the time per phase (sampling, neighbor search, edge checks, insertion);
-- the number of edges checked and the roadmap size;
-- the commit, compiler and CPU model.
-
-The baseline (`--mode serial`) is VAMP's unmodified `PRM::build_roadmap()`, compiled with the same
-compiler and flags. Every configuration gets one warm-up run, then `REPEATS` timed runs (default 20)
-with the same sampler seed. Threads are pinned one per core (`OMP_PROC_BIND=close`,
-`OMP_PLACES=cores`).
+- **Baseline:** VAMP's unmodified `PRM::build_roadmap()`, compiled with the same compiler and flags.
+- **Problem:** the Panda with the start and goal of VAMP's sphere cage example, in three
+  environments: `empty`; `cage`, VAMP's 14 spheres of radius 0.2; `spheres64`, 64 spheres of
+  radius 0.06 at fixed random positions.
+- **Timing:** one warm-up and 20 timed runs per configuration (5 at 100,000 nodes), with the same
+  sampler seed every run. Figures and tables use the median.
+- **Threads:** one per physical core (`OMP_PROC_BIND=close`, `OMP_PLACES=cores`), in powers of two
+  up to the number of cores available.
 
 | Sweep | What varies | Figures |
 |---|---|---|
-| `scaling` | threads × environment (empty, cage, 64 spheres), and threads × schedule. 10,000 nodes, batch 1024 | speedup, phase breakdown, schedules |
-| `sizes` | batch size (1 to 16,384) × roadmap size (100 to 100,000), all cores | batch-size heatmap |
-| `revalidate` | threads × roadmap size (5,000 to 100,000) | revalidation rate |
-
-To run a sweep on your own machine:
+| `scaling` | threads × environment, and threads × schedule. 10,000 nodes, batch 1024 | speedup, phase breakdown, schedule |
+| `sizes` | batch size (1 to 16,384) × roadmap size (100 to 100,000), all cores | batch size |
+| `revalidate` | threads × roadmap size (5,000 to 100,000) | revalidation |
 
 ```bash
-REPEATS=5 bash bench/sweep.sh scaling build/coven_bench bench/results/mine.csv
-python bench/plot.py bench/results/mine.csv --out bench/results/mine
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j --target coven_bench
+build/coven_bench --check --mode parallel --nodes 5000 --threads 8 --repeats 0 --warmup 0
+for sweep in scaling sizes revalidate; do bash bench/sweep.sh $sweep build/coven_bench bench/results/$sweep.csv; done
+python bench/plot.py bench/results/*.csv --out bench/results/figures
 ```
 
-`plot.py` writes the figures and a `summary.txt` with the numbers behind them.
+`--check` fails unless the parallel roadmap equals the serial one. `REPEATS=5` in front of
+`sweep.sh` shortens a sweep. `plot.py` writes the figures and `summary.txt`, the numbers behind them.
 
-### On Euler
-
-The job script follows the [course Slurm rules](https://github.com/tsung-wei-huang/repo759/blob/main/Assignments/general/slurm_usage.md):
-
-- it uses the `instruction` partition;
-- it sets a time limit;
-- it asks only for the cores the program uses (`-c 16`).
-
-Nothing runs on the login node except downloads and compilation.
+On a Slurm cluster, `bench/slurm.sh` builds on the compute node, so `-march=native` matches the CPU,
+runs the check, then runs one sweep:
 
 ```bash
-# on the login node, in a clone of this repository
-module load gcc cmake                      # check the names with: module avail gcc cmake
-CPM_SOURCE_CACHE=$HOME/.cache/CPM cmake -S . -B build/euler    # downloads VAMP and its dependencies once
 mkdir -p bench/results
-sbatch bench/euler.sbatch scaling
-sbatch bench/euler.sbatch sizes
-sbatch bench/euler.sbatch revalidate
-squeue -u $USER
+MODULES="gcc cmake" sbatch -p <partition> --dependency=singleton bench/slurm.sh scaling
 ```
-
-Each job builds `coven_bench` on its compute node, so `-march=native` matches the CPU it runs on. It
-checks that the parallel roadmap equals the serial one on that machine, then writes
-`bench/results/euler-<sweep>-<job id>.csv`. Then:
-
-```bash
-python bench/plot.py bench/results/euler-*.csv --out bench/results/euler
-```
-
-Before submitting, check these in `bench/euler.sbatch`:
-
-- **Module names** on the `module load` line.
-- **Core count** (`-c 16`). `sinfo -p instruction -o "%n %c %m"` lists the cores per node.
-- **Time limit** (30 minutes). `sizes` with the default 20 repeats is the longest sweep. If it runs
-  out of time, submit it with `REPEATS=10 sbatch bench/euler.sbatch sizes`.
-
-If Euler allocates hyperthreads rather than cores, `-c 16` may be only 8 physical cores. The job log
-then says `using 8 threads at most`, and `-c 32` gets 16 cores.
 
 ## Results
 
-Pending the Euler runs.
+Pending.
 
 ## Layout
 
@@ -238,7 +185,7 @@ Pending the Euler runs.
 | `src/python.cc` | Python bindings (`coven._core`) |
 | `coven/` | Python package, including `Replanner` for replanning on a fixed roadmap |
 | `tests/` | C++ (Catch2) and Python tests |
-| `bench/` | Benchmark driver, sweeps, Euler job script and plots |
+| `bench/` | Benchmark driver, sweeps, plots and results |
 | `demo/` | `viser` demo |
 
 ## Acknowledgements

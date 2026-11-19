@@ -319,15 +319,13 @@ namespace coven
                             return;
                         }
 
-                        // Idle: let a batch build up. Busy: requests join the next round directly. The wait
-                        // is on system_clock: waiting on steady_clock needs pthread_cond_clockwait, which a
-                        // GCC built for another glibc than the system's may fail to link.
+                        // Idle: let a batch build up. Busy: requests join the next round directly.
                         if (options_.window.count() > 0)
                         {
-                            const auto left = first_arrival_ + options_.window - Clock::now();
-                            const auto deadline = std::chrono::system_clock::now() +
-                                                  std::chrono::duration_cast<std::chrono::system_clock::duration>(left);
-                            wake_.wait_until(lock, deadline, [this]() { return stopping_; });
+                            const auto deadline = first_arrival_ + options_.window;
+                            lock.unlock();
+                            std::this_thread::sleep_until(deadline);
+                            lock.lock();
                         }
                     }
 

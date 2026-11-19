@@ -10,7 +10,6 @@ from coven._core import (
     max_threads,
     panda,
     set_num_threads,
-    set_schedule,
     sphere,
     ur5,
 )
@@ -28,7 +27,6 @@ __all__ = [
     "panda",
     "roadmap_settings",
     "set_num_threads",
-    "set_schedule",
     "sphere",
     "ur5",
 ]

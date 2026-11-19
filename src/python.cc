@@ -6,7 +6,6 @@
 
 #include <cstdint>
 #include <cstring>
-#include <stdexcept>
 #include <string>
 
 #include <omp.h>
@@ -193,31 +192,6 @@ NB_MODULE(_core, m)
         [](int threads) { omp_set_num_threads(threads); },
         "threads"_a,
         "Set the number of threads the roadmap functions use, for the calling thread.");
-
-    m.def(
-        "set_schedule",
-        [](const std::string &kind, int chunk)
-        {
-            if (kind == "static")
-            {
-                omp_set_schedule(omp_sched_static, chunk);
-            }
-            else if (kind == "dynamic")
-            {
-                omp_set_schedule(omp_sched_dynamic, chunk);
-            }
-            else if (kind == "guided")
-            {
-                omp_set_schedule(omp_sched_guided, chunk);
-            }
-            else
-            {
-                throw std::invalid_argument("schedule must be static, dynamic, or guided");
-            }
-        },
-        "kind"_a,
-        "chunk"_a = 0,
-        "Set how the roadmap functions share edges among threads: static, dynamic, or guided.");
 
     bind_robot<vamp::robots::Sphere>(m, "sphere");
     bind_robot<vamp::robots::UR5>(m, "ur5");

@@ -53,7 +53,7 @@ scaling)
         done
     done
     for t in "${threads[@]}"; do
-        for schedule in "static 0" "dynamic 16" "guided 0"; do
+        for schedule in "static 0" "dynamic 0" "dynamic 16"; do
             set -- $schedule
             run --mode parallel --env cage --nodes 10000 --threads "$t" --schedule "$1" --chunk "$2" \
                 --repeats "$repeats"

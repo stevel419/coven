@@ -26,6 +26,8 @@ SURFACE, TEXT, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e6e5e0"
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
 RAMP = ["#86b6ef", "#2a78d6", "#104281"]
 DIVERGING = LinearSegmentedColormap.from_list("slower_faster", ["#d03b3b", "#f0efec", "#2a78d6"])
+# Schedule of every run except the schedule sweep (coven_bench --schedule default)
+DEFAULT_SCHEDULE = "guided"
 PHASES = [("validate_ns", "edge validation"), ("neighbor_ns", "neighbor search"), ("sample_ns", "sampling"),
           ("insert_ns", "insertion"), ("other_ns", "other")]
 
@@ -97,7 +99,7 @@ def thread_axis(ax, threads):
 
 
 def figure_speedup(runs, out, lines):
-    groups = [g for g in most_threads(runs, mode="parallel", schedule="dynamic")
+    groups = [g for g in most_threads(runs, mode="parallel", schedule=DEFAULT_SCHEDULE)
               if ("serial", g[0], g[1], 0, 1, "") in runs]
     if not groups:
         return lines.append("figure 1 skipped: no scaling sweep with a serial baseline")
@@ -108,7 +110,7 @@ def figure_speedup(runs, out, lines):
     for ax, env in zip(axes[0], envs):
         serial = med(runs[("serial", env, nodes, 0, 1, "")])
         by_threads = {k[4]: v for k, v in select(
-            runs, mode="parallel", env=env, nodes=nodes, batch=batch, schedule="dynamic").items()}
+            runs, mode="parallel", env=env, nodes=nodes, batch=batch, schedule=DEFAULT_SCHEDULE).items()}
         threads = sorted(by_threads)
         speedup = [serial / med(by_threads[t]) for t in threads]
         low = [serial / quartiles(by_threads[t])[1] for t in threads]
@@ -144,12 +146,12 @@ def figure_speedup(runs, out, lines):
 
 
 def figure_breakdown(runs, out, lines):
-    groups = most_threads(runs, mode="parallel", schedule="dynamic")
+    groups = most_threads(runs, mode="parallel", schedule=DEFAULT_SCHEDULE)
     if not groups:
         return lines.append("figure 2 skipped: no parallel runs")
     env, nodes, batch = next((g for g in groups if g[0] == "cage"), groups[0])
     by_threads = {k[4]: v for k, v in select(
-        runs, mode="parallel", env=env, nodes=nodes, batch=batch, schedule="dynamic").items()}
+        runs, mode="parallel", env=env, nodes=nodes, batch=batch, schedule=DEFAULT_SCHEDULE).items()}
     threads = sorted(by_threads)
     parts = {}
     for t in threads:
@@ -208,7 +210,7 @@ def figure_schedule(runs, out, lines):
 
 def figure_sizes(runs, out, lines):
     cells = {}
-    for key, rows in select(runs, mode="parallel", schedule="dynamic").items():
+    for key, rows in select(runs, mode="parallel", schedule=DEFAULT_SCHEDULE).items():
         _, env, nodes, batch, threads, _ = key
         serial = runs.get(("serial", env, nodes, 0, 1, ""))
         if serial and threads > 1:
@@ -217,7 +219,9 @@ def figure_sizes(runs, out, lines):
     if not cells:
         return lines.append("figure 4 skipped: no batch size x roadmap size sweep")
     (env, threads), grid = max(cells.items(), key=lambda item: len(item[1]))
-    sizes = sorted({n for n, _ in grid})
+    # Roadmap sizes from other sweeps (a single batch size) would leave a row of empty cells
+    sizes = sorted({n for n, _ in grid if sum(m == n for m, _ in grid) > 1})
+    grid = {(n, b): v for (n, b), v in grid.items() if n in sizes}
     batches = sorted({b for _, b in grid})
     fig, ax = plt.subplots(figsize=(1.0 * len(batches) + 2.2, 0.55 * len(sizes) + 1.6))
     values = [[grid.get((n, b), float("nan")) for b in batches] for n in sizes]

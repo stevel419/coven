@@ -1,7 +1,7 @@
 // Benchmark driver. Prints one CSV row per timed run.
 //
 //   coven_bench --mode serial|parallel|revalidate [--env cage] [--nodes 10000] [--batch 1024]
-//               [--threads 1] [--schedule dynamic] [--chunk 0] [--repeats 20] [--warmup 1]
+//               [--threads 1] [--schedule guided] [--chunk 0] [--repeats 20] [--warmup 1]
 //               [--commit HASH] [--header] [--check]
 //
 // serial      unmodified vamp PRM::build_roadmap()
@@ -132,7 +132,7 @@ auto main(int argc, char **argv) -> int
     std::map<std::string, std::string> args{
         {"mode", "parallel"}, {"env", "cage"},  {"nodes", "10000"},  {"batch", "1024"},
         {"threads", "1"},     {"chunk", "0"},   {"repeats", "20"},   {"warmup", "1"},
-        {"commit", "unknown"}, {"schedule", "dynamic"},
+        {"commit", "unknown"}, {"schedule", "guided"},
     };
 
     bool header = false;

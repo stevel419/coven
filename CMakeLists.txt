@@ -57,12 +57,16 @@ if(COVEN_BUILD_TESTS)
 
   add_executable(coven_tests tests/test_pprm.cc)
   target_link_libraries(coven_tests PRIVATE coven Catch2::Catch2WithMain)
+  # The tests run every schedule
+  target_compile_definitions(coven_tests PRIVATE COVEN_SCHEDULE=runtime)
   catch_discover_tests(coven_tests)
 endif()
 
 if(COVEN_BUILD_BENCH)
   add_executable(coven_bench bench/bench.cc)
   target_link_libraries(coven_bench PRIVATE coven)
+  # --schedule picks the schedule
+  target_compile_definitions(coven_bench PRIVATE COVEN_SCHEDULE=runtime)
 endif()
 
 if(COVEN_BUILD_PYTHON)

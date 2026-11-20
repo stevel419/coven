@@ -30,6 +30,7 @@ def main(out):
     lines = [
         "# MotionBenchMaker problems for the Panda, from VAMP's resources/panda/problems.tar.bz2 (VAMP and",
         "# MotionBenchMaker, Kavraki Lab). Written by bench/mbm_export.py; see that file for the format.",
+        "# Derived from VAMP and licensed under its Apache License 2.0: see bench/mbm_panda.LICENSE.",
     ]
     for scenario in problems.scenarios():
         for number, p in enumerate(problems.problems(scenario), 1):

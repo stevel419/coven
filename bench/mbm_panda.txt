@@ -1,5 +1,6 @@
 # MotionBenchMaker problems for the Panda, from VAMP's resources/panda/problems.tar.bz2 (VAMP and
 # MotionBenchMaker, Kavraki Lab). Written by bench/mbm_export.py; see that file for the format.
+# Derived from VAMP and licensed under its Apache License 2.0: see bench/mbm_panda.LICENSE.
 problem bookshelf_small 1 1
 start 0 -0.785 0 -2.356 0 1.571 0.785
 goal 1.48905 -0.146671 -2.88497 -2.17456 2.70992 2.35321 1.06196

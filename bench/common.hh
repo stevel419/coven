@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <random>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -19,10 +20,116 @@ namespace coven::bench
 {
     using Environment = vamp::collision::Environment<vamp::FloatVector<vamp::FloatVectorWidth>>;
 
+    // One MotionBenchMaker problem for the Panda, as bench/mbm_export.py writes them
+    struct Problem
+    {
+        std::string scenario;
+        int number{0};
+        bool valid{false};  // start and goal are collision-free
+        std::array<float, 7> start{};
+        std::array<float, 7> goal{};
+        vamp::collision::Environment<float> environment;
+    };
+
+    // Adds obstacles the way VAMP's Python Environment.add_cuboid() and add_capsule() do
+    inline void add_cuboid(vamp::collision::Environment<float> &e, const vamp::collision::Cuboid<float> &c)
+    {
+        (c.axis_3_z == 1. ? e.z_aligned_cuboids : e.cuboids).emplace_back(c);
+    }
+
+    inline void add_capsule(vamp::collision::Environment<float> &e, const vamp::collision::Capsule<float> &c)
+    {
+        (c.xv == 0. and c.yv == 0. ? e.z_aligned_capsules : e.capsules).emplace_back(c);
+    }
+
+    // All problems in the file, with every obstacle moved by `shift` along x. Exits if it cannot be read.
+    inline auto load_problems(const std::string &path, float shift = 0.F) -> std::vector<Problem>
+    {
+        namespace factory = vamp::collision::factory;
+        std::ifstream file(path);
+        if (not file)
+        {
+            std::cerr << "cannot read " << path << " (run from the repository root, or pass --data)" << std::endl;
+            std::exit(2);
+        }
+
+        std::vector<Problem> problems;
+        for (std::string line; std::getline(file, line);)
+        {
+            std::istringstream in(line);
+            std::string kind;
+            in >> kind;
+            if (kind.empty() or kind[0] == '#')
+            {
+                continue;
+            }
+
+            if (kind == "problem")
+            {
+                problems.emplace_back();
+                in >> problems.back().scenario >> problems.back().number >> problems.back().valid;
+                continue;
+            }
+
+            auto &p = problems.back();
+            std::vector<float> v;
+            for (float x; in >> x;)
+            {
+                v.push_back(x);
+            }
+
+            if (kind == "start" or kind == "goal")
+            {
+                std::copy(v.begin(), v.end(), (kind == "start" ? p.start : p.goal).begin());
+            }
+            else if (kind == "sphere")
+            {
+                p.environment.spheres.emplace_back(factory::sphere::flat(v[0] + shift, v[1], v[2], v[3]));
+            }
+            else if (kind == "cuboid")
+            {
+                add_cuboid(p.environment, factory::cuboid::flat(v[0] + shift, v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]));
+            }
+            else if (kind == "capsule")
+            {
+                add_capsule(p.environment, factory::cylinder::center::flat(v[0] + shift, v[1], v[2], v[3], v[4], v[5], v[6], v[7]));
+            }
+        }
+
+        for (auto &p : problems)
+        {
+            p.environment.sort();
+        }
+
+        return problems;
+    }
+
+    // Where coven_bench and coven_mbm look for the problems; MBM_DATA overrides it
+    inline auto problem_file() -> std::string
+    {
+        const char *path = std::getenv("MBM_DATA");
+        return path ? path : "bench/mbm_panda.txt";
+    }
+
     // The scene `name`, with every obstacle moved by `shift` along x. `name` is empty, cage (VAMP's sphere
-    // cage example) or spheresN (N random spheres, fixed seed). Exits on an unknown name.
+    // cage example), spheresN (N random spheres, fixed seed), or mbm:<scenario> (the scene of that
+    // MotionBenchMaker scenario's first problem). Exits on an unknown name.
     inline auto make_environment(const std::string &name, float shift) -> Environment
     {
+        if (name.rfind("mbm:", 0) == 0)
+        {
+            for (const auto &p : load_problems(problem_file(), shift))
+            {
+                if (p.scenario == name.substr(4))
+                {
+                    return Environment(p.environment);
+                }
+            }
+
+            std::cerr << "unknown MotionBenchMaker scenario " << name.substr(4) << std::endl;
+            std::exit(2);
+        }
+
         vamp::collision::Environment<float> environment;
         const auto add = [&](float x, float y, float z, float radius)
         { environment.spheres.emplace_back(vamp::collision::factory::sphere::flat(x + shift, y, z, radius)); };

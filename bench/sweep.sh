@@ -8,6 +8,8 @@
 # revalidate    full recheck of a roadmap, threads x roadmap size, and threads x schedule (figure 5)
 # service       planning service load tests with coven_load (next to coven_bench)  (figures 6, 7, 8)
 # service-http  the same service over HTTP with bench/load.py, and in process     (figure 9)
+# mbm           MotionBenchMaker: construction and revalidation per scenario, and every problem
+#               with VAMP's RRT-Connect and with the service (coven_mbm)       (figures 10, 11, 12)
 #               (needs the Python package installed: pip install .)
 # quick         a few small runs of every kind, to test the pipeline
 #
@@ -130,6 +132,35 @@ service)
             done
         done
     done
+    ;;
+mbm)
+    # MotionBenchMaker. Construction and revalidation in each scenario's first scene, as above, with
+    # coven_bench; then every problem with VAMP's RRT-Connect and with the planning service, with
+    # coven_mbm, into a second file next to $out.
+    r=$(((repeats + 1) / 2))
+    for scenario in bookshelf_small bookshelf_tall bookshelf_thin box cage table_pick table_under_pick; do
+        run --mode serial --env "mbm:$scenario" --nodes 10000 --repeats "$r"
+        for t in "${threads[@]}"; do
+            run --mode parallel --env "mbm:$scenario" --nodes 10000 --threads "$t" --repeats "$r"
+            run --mode revalidate --env "mbm:$scenario" --nodes 10000 --threads "$t" --repeats "$r"
+        done
+    done
+
+    mbm=$(dirname "$bench")/coven_mbm
+    problems=${out%.csv}_problems.csv
+    [ -s "$problems" ] || "$mbm" --header > "$problems"
+    mbm_run() {
+        echo "coven_mbm $*" >&2
+        "$mbm" --commit "$commit" "$@" >> "$problems"
+    }
+    mbm_run --method rrtc
+    for nodes in 5000 10000 20000 50000; do
+        for connections in 8 64; do
+            mbm_run --method lazy --nodes "$nodes" --connections "$connections" --threads "$cores"
+        done
+    done
+    mbm_run --method lazy --nodes 10000 --threads 1
+    mbm_run --method eager --nodes 10000 --threads "$cores"
     ;;
 service-http)
     port=${PORT:-$((20000 + RANDOM % 20000))}

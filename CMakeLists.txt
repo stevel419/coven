@@ -70,6 +70,9 @@ if(COVEN_BUILD_BENCH)
 
   add_executable(coven_load bench/load.cc)
   target_link_libraries(coven_load PRIVATE coven)
+
+  add_executable(coven_mbm bench/mbm.cc)
+  target_link_libraries(coven_mbm PRIVATE coven)
 endif()
 
 if(COVEN_BUILD_PYTHON)

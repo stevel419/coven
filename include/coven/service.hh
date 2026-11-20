@@ -35,7 +35,7 @@ namespace coven
         bool eager = false;                   // Check every edge of a scene when it changes
         std::size_t max_in_flight = 65536;    // Requests queued or being planned; more are refused
         std::size_t max_rounds = 64;          // Rounds before a request has its whole scene checked
-        std::size_t connections = 8;          // Roadmap vertices tried for the start and for the goal
+        std::size_t connections = 64;         // Roadmap vertices tried for the start and for the goal
     };
 
     enum class PlanStatus : std::uint8_t

@@ -3,7 +3,8 @@
     python bench/plot.py bench/results/*.csv --out bench/results/figures
 
 Writes the PNG files and summary.txt (the numbers behind the figures) into the output directory:
-figures 0-5 from coven_bench's CSV files, 6-9 from the planning service's load tests.
+figures 0-5 from coven_bench's CSV files, 6-9 from the planning service's load tests, 10-12 from the
+MotionBenchMaker sweep (coven_bench rows with --env mbm:..., and coven_mbm's per-problem rows).
 Runs of the same configuration from several files are pooled. A figure is skipped, with a message,
 when the CSV files do not contain the sweep it needs.
 """
@@ -490,21 +491,164 @@ def figure_http(rows, out, lines):
     save(fig, out, "9_http.png", lines)
 
 
+# MotionBenchMaker (coven_bench with --env mbm:<scenario>, and coven_mbm)
+
+SCENARIOS = ["bookshelf_small", "bookshelf_tall", "bookshelf_thin", "box", "cage", "table_pick", "table_under_pick"]
+NODE_RAMP = ["#b7d3f6", "#86b6ef", "#2a78d6", "#104281"]
+
+
+def scenario_axis(ax, scenarios):
+    ax.set_xticks(range(len(scenarios)), [s.replace("_", " ") for s in scenarios], rotation=25, ha="right")
+    ax.grid(axis="x", visible=False)
+
+
+def figure_mbm_scaling(runs, out, lines):
+    rows = []
+    for scenario in SCENARIOS:
+        env = f"mbm:{scenario}"
+        serial = runs.get(("serial", env, 10000, 0, 1, ""))
+        parallel = select(runs, mode="parallel", env=env, schedule=DEFAULT_SCHEDULE)
+        recheck = select(runs, mode="revalidate", env=env, schedule=RECHECK_SCHEDULE)
+        if not (serial and parallel and recheck):
+            continue
+        top = max(k[4] for k in parallel)
+        build = med(serial) / med(parallel[max(parallel, key=lambda k: k[4])])
+        one = med(next(v for k, v in recheck.items() if k[4] == 1))
+        best = med(recheck[max(recheck, key=lambda k: k[4])])
+        rows.append((scenario, top, med(serial) / 1e6, build, one / 1e6, one / best))
+    if not rows:
+        return lines.append("figure 10 skipped: no MotionBenchMaker sweep")
+    fig, ax = plt.subplots(figsize=(7.5, 3.8))
+    x = range(len(rows))
+    ax.bar([i - 0.19 for i in x], [r[3] for r in rows], 0.36, color=SERIES[0], label="construction, vs serial PRM")
+    ax.bar([i + 0.19 for i in x], [r[5] for r in rows], 0.36, color=SERIES[1], label="revalidation, vs 1 thread")
+    scenario_axis(ax, [r[0] for r in rows])
+    ax.set_ylabel(f"speedup at {rows[0][1]} threads")
+    ax.set_title("MotionBenchMaker scenes: 10,000 nodes")
+    ax.legend(loc="lower right")
+    lines.append(f"\nFigure 10: MotionBenchMaker construction and revalidation, 10000 nodes, {rows[0][1]} threads")
+    for scenario, _, serial, build, one, recheck in rows:
+        lines.append(f"  {scenario:17s} serial PRM {serial:8.1f} ms, construction {build:5.2f}x, "
+                     f"revalidation {one:7.1f} ms on 1 thread, {recheck:5.2f}x")
+    save(fig, out, "10_mbm_scaling.png", lines)
+
+
+def load_problems(paths):
+    rows = []
+    for path in paths:
+        with open(path, newline="") as f:
+            for r in csv.DictReader(f):
+                for name in ("problem", "nodes", "threads", "connections", "success"):
+                    r[name] = int(r[name])
+                for name in ("setup_ns", "plan_ns", "simplify_ns", "cost", "simplified_cost"):
+                    r[name] = float(r[name])
+                rows.append(r)
+    return rows
+
+
+def solved(rows, **want):
+    """Per scenario, the share of problems solved by the matching runs (None when there are none)."""
+    result = {}
+    for scenario in SCENARIOS:
+        rs = [r for r in rows if r["scenario"] == scenario and all(r[k] == v for k, v in want.items())]
+        result[scenario] = 100 * sum(r["success"] for r in rs) / len(rs) if rs else None
+    return result
+
+
+def figure_mbm_success(rows, out, lines):
+    if not rows:
+        return lines.append("figure 11 skipped: no coven_mbm results")
+    threads = max(r["threads"] for r in rows)
+    nodes = sorted({r["nodes"] for r in rows if r["method"] == "lazy" and r["connections"] == 64 and r["threads"] == threads})
+    rrtc = solved(rows, method="rrtc")
+    fig, (left, right) = plt.subplots(1, 2, figsize=(12, 4))
+    x = range(len(SCENARIOS))
+    lines.append("\nFigure 11: problems solved (%), roadmap built in free space, lazy service")
+    width = 0.8 / max(len(nodes), 1)
+    for k, (n, color) in enumerate(zip(nodes, NODE_RAMP[-len(nodes):])):
+        share = solved(rows, method="lazy", nodes=n, connections=64, threads=threads)
+        left.bar([i - 0.4 + width * (k + 0.5) for i in x], [share[s] or 0 for s in SCENARIOS], width, color=color,
+                 label=f"{n:,} nodes")
+        lines.append(f"  {n:6d} nodes, 64 connections: " + "  ".join(f"{s} {share[s]:.0f}" for s in SCENARIOS if share[s] is not None))
+    left.scatter(list(x), [rrtc[s] or 0 for s in SCENARIOS], marker="_", s=400, color=TEXT, zorder=3, label="VAMP RRT-Connect")
+    lines.append("  VAMP RRT-Connect: " + "  ".join(f"{s} {rrtc[s]:.0f}" for s in SCENARIOS if rrtc[s] is not None))
+    left.set_title("By roadmap size, 64 connections")
+    for k, (connections, color) in enumerate(zip((8, 64), (SERIES[1], SERIES[0]))):
+        share = solved(rows, method="lazy", nodes=10000, connections=connections, threads=threads)
+        right.bar([i - 0.2 + 0.4 * k for i in x], [share[s] or 0 for s in SCENARIOS], 0.38, color=color,
+                  label=f"{connections} connections")
+        lines.append(f"  10000 nodes, {connections:2d} connections: " + "  ".join(f"{s} {share[s]:.0f}" for s in SCENARIOS if share[s] is not None))
+    right.set_title("By start and goal connections, 10,000 nodes")
+    for ax in (left, right):
+        scenario_axis(ax, SCENARIOS)
+        ax.set_ylim(0, 105)
+        ax.set_ylabel("problems solved (%)")
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.32), ncol=5, fontsize=8)
+    save(fig, out, "11_mbm_success.png", lines)
+
+
+def figure_mbm_time(rows, out, lines):
+    if not rows:
+        return lines.append("figure 12 skipped: no coven_mbm results")
+    threads = max(r["threads"] for r in rows)
+    methods = [("VAMP RRT-Connect, 1 thread", dict(method="rrtc")),
+               (f"Coven lazy, {threads} threads", dict(method="lazy", nodes=10000, connections=64, threads=threads)),
+               ("Coven lazy, 1 thread", dict(method="lazy", nodes=10000, connections=64, threads=1)),
+               (f"Coven eager, {threads} threads", dict(method="eager", nodes=10000, connections=64, threads=threads))]
+    fig, (left, right) = plt.subplots(1, 2, figsize=(12, 4))
+    x = range(len(SCENARIOS))
+    lines.append("\nFigure 12: median time per problem (ms, scene setup and plan, solved problems) and cost")
+    width = 0.8 / len(methods)
+    for k, ((label, want), color) in enumerate(zip(methods, SERIES)):
+        times = []
+        for scenario in SCENARIOS:
+            rs = [r for r in rows if r["scenario"] == scenario and r["success"] and all(r[a] == b for a, b in want.items())]
+            times.append(statistics.median((r["setup_ns"] + r["plan_ns"]) / 1e6 for r in rs) if rs else float("nan"))
+        left.bar([i - 0.4 + width * (k + 0.5) for i in x], times, width, color=color, label=label)
+        lines.append(f"  {label:28s} " + "  ".join(f"{s} {t:.3f}" for s, t in zip(SCENARIOS, times)))
+    left.set_yscale("log")
+    left.set_ylabel("ms per problem (median)")
+    left.set_title("Time to a path in a new scene")
+
+    # Path length after VAMP's simplification, on problems both solved
+    key = lambda r: (r["scenario"], r["problem"])  # noqa: E731
+    vamp_cost = {key(r): r["simplified_cost"] for r in rows if r["method"] == "rrtc" and r["success"]}
+    ratios = []
+    for scenario in SCENARIOS:
+        rs = [r for r in rows if r["scenario"] == scenario and r["success"] and key(r) in vamp_cost
+              and all(r[a] == b for a, b in methods[1][1].items())]
+        ratios.append(statistics.median(r["simplified_cost"] / vamp_cost[key(r)] for r in rs) if rs else float("nan"))
+    right.bar(list(x), ratios, 0.6, color=SERIES[0])
+    right.axhline(1.0, color=MUTED, linewidth=1.2, linestyle="--")
+    right.set_ylabel("Coven / RRT-Connect (median)")
+    right.set_title("Simplified path length, problems both solved")
+    lines.append("  simplified path length, Coven lazy / RRT-Connect: " + "  ".join(f"{s} {v:.2f}" for s, v in zip(SCENARIOS, ratios)))
+    for ax in (left, right):
+        scenario_axis(ax, SCENARIOS)
+    left.legend(loc="upper left", fontsize=8)
+    save(fig, out, "12_mbm_time.png", lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("csv", nargs="+", type=Path)
     parser.add_argument("--out", type=Path, default=Path("bench/results/figures"))
     args = parser.parse_args()
 
-    # Load test files have their own columns
-    service_paths = [p for p in args.csv if "transport" in p.open().readline()]
-    runs = load([p for p in args.csv if p not in service_paths])
+    # Load test files and coven_mbm files have their own columns
+    headers = {p: p.open().readline() for p in args.csv}
+    service_paths = [p for p in args.csv if "transport" in headers[p]]
+    problem_paths = [p for p in args.csv if headers[p].startswith("method,scenario")]
+    everything = load([p for p in args.csv if p not in service_paths and p not in problem_paths])
+    runs = {k: v for k, v in everything.items() if not k[1].startswith("mbm:")}
+    mbm = {k: v for k, v in everything.items() if k[1].startswith("mbm:")}
     service = load_service(service_paths)
-    if not runs and not service:
+    problem_rows = load_problems(problem_paths)
+    if not everything and not service and not problem_rows:
         sys.exit("no rows in the given CSV files")
     args.out.mkdir(parents=True, exist_ok=True)
 
-    first = next(iter(runs.values()))[0] if runs else service[0]
+    first = (next(iter(everything.values()))[0] if everything else service[0] if service else problem_rows[0])
     lines = [f"cpu: {first['cpu']}", f"compiler: {first['compiler']}", f"commit: {first['commit']}"]
     if runs:
         for figure in (figure_time, figure_speedup, figure_breakdown, figure_schedule, figure_sizes,
@@ -513,6 +657,11 @@ def main():
     if service:
         for figure in (figure_serving, figure_scenes, figure_modes, figure_http):
             figure(service, args.out, lines)
+    if mbm:
+        figure_mbm_scaling(mbm, args.out, lines)
+    if problem_rows:
+        figure_mbm_success(problem_rows, args.out, lines)
+        figure_mbm_time(problem_rows, args.out, lines)
     (args.out / "summary.txt").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
 

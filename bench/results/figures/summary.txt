@@ -101,3 +101,31 @@ Figure 8: lazy and eager checking, one scene, 16 threads
   eager: update 10: capacity 9874/s, p50 at 100/s 28.7 ms  update 100: capacity 29901/s, p50 at 100/s 0.4 ms  update 1000: capacity 29892/s, p50 at 100/s 0.4 ms  update never: capacity 30016/s, p50 at 100/s 0.4 ms
 wrote 8_modes.png
 figure 9 skipped: no service-http sweep
+
+Figure 10: MotionBenchMaker construction and revalidation, 10000 nodes, 16 threads
+  bookshelf_small   serial PRM   1449.4 ms, construction 11.35x, revalidation  1361.2 ms on 1 thread, 13.05x
+  bookshelf_tall    serial PRM   1540.2 ms, construction 11.56x, revalidation  1445.2 ms on 1 thread, 13.27x
+  bookshelf_thin    serial PRM   1731.9 ms, construction 11.61x, revalidation  1568.7 ms on 1 thread, 13.16x
+  box               serial PRM   1484.3 ms, construction 11.50x, revalidation  1369.8 ms on 1 thread, 13.24x
+  cage              serial PRM   1476.6 ms, construction 11.71x, revalidation  1346.1 ms on 1 thread, 13.24x
+  table_pick        serial PRM   1469.8 ms, construction 11.56x, revalidation  1377.9 ms on 1 thread, 13.33x
+  table_under_pick  serial PRM   1477.8 ms, construction 11.62x, revalidation  1378.7 ms on 1 thread, 13.26x
+wrote 10_mbm_scaling.png
+
+Figure 11: problems solved (%), roadmap built in free space, lazy service
+    5000 nodes, 64 connections: bookshelf_small 69  bookshelf_tall 86  bookshelf_thin 83  box 99  cage 0  table_pick 100  table_under_pick 100
+   10000 nodes, 64 connections: bookshelf_small 75  bookshelf_tall 85  bookshelf_thin 92  box 99  cage 4  table_pick 98  table_under_pick 99
+   20000 nodes, 64 connections: bookshelf_small 81  bookshelf_tall 86  bookshelf_thin 95  box 99  cage 10  table_pick 97  table_under_pick 100
+   50000 nodes, 64 connections: bookshelf_small 80  bookshelf_tall 91  bookshelf_thin 95  box 100  cage 38  table_pick 97  table_under_pick 100
+  VAMP RRT-Connect: bookshelf_small 100  bookshelf_tall 100  bookshelf_thin 100  box 100  cage 100  table_pick 100  table_under_pick 100
+  10000 nodes,  8 connections: bookshelf_small 48  bookshelf_tall 50  bookshelf_thin 61  box 94  cage 1  table_pick 65  table_under_pick 67
+  10000 nodes, 64 connections: bookshelf_small 75  bookshelf_tall 85  bookshelf_thin 92  box 99  cage 4  table_pick 98  table_under_pick 99
+wrote 11_mbm_success.png
+
+Figure 12: median time per problem (ms, scene setup and plan, solved problems) and cost
+  VAMP RRT-Connect, 1 thread   bookshelf_small 0.038  bookshelf_tall 0.040  bookshelf_thin 0.043  box 0.079  cage 0.250  table_pick 0.030  table_under_pick 0.059
+  Coven lazy, 16 threads       bookshelf_small 0.805  bookshelf_tall 0.814  bookshelf_thin 0.909  box 0.980  cage 105.177  table_pick 0.809  table_under_pick 1.096
+  Coven lazy, 1 thread         bookshelf_small 7.557  bookshelf_tall 7.780  bookshelf_thin 8.619  box 7.872  cage 111.630  table_pick 7.637  table_under_pick 7.768
+  Coven eager, 16 threads      bookshelf_small 92.058  bookshelf_tall 100.087  bookshelf_thin 102.924  box 83.440  cage 81.798  table_pick 94.582  table_under_pick 93.330
+  simplified path length, Coven lazy / RRT-Connect: bookshelf_small 1.00  bookshelf_tall 1.00  bookshelf_thin 0.99  box 0.97  cage 1.25  table_pick 1.00  table_under_pick 0.90
+wrote 12_mbm_time.png

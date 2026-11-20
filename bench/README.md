@@ -8,10 +8,10 @@ Full results behind the [Performance](../README.md#performance) section, and how
 |---|---|
 | CPU | 2 × AMD EPYC 9254 (Zen 4, 24 cores per socket, 2 hardware threads per core), shared node |
 | Threads | Up to 16, one per physical core (`OMP_PROC_BIND=close`, `OMP_PLACES=cores`) |
-| Compiler | GCC 13.2.0, `-O3 -march=native -flto` (VAMP's Release settings) |
+| Compiler | GCC 13.2.0, `-O3 -march=native -flto` |
 | Code | VAMP `27cb9b6`; Coven `e24845b` (construction) and `f31279b` (revalidation) |
 | Problem | Panda, start and goal of VAMP's sphere cage example |
-| Baseline | VAMP's unmodified `PRM::build_roadmap()`, same compiler and flags |
+| Baseline | VAMP's `PRM::build_roadmap()`, same compiler and flags |
 | Timing | Median of 20 runs after one warm-up (5 runs at 100,000 nodes), same sampler seed each run |
 
 Every job first checked that the parallel roadmap equals the serial one (5,000 vertices, 63,283
@@ -166,6 +166,69 @@ One scene, 16 threads:
 
 At 30,000 offered with 16 threads and one scene, the dispatcher spends 51–83% of its time connecting
 new requests and searching, which run in parallel across requests, and 11–17% checking.
+
+## MotionBenchMaker
+
+The 700 Panda problems VAMP ships ([MotionBenchMaker](https://github.com/KavrakiLab/motion_bench_maker)):
+seven scenarios of 100 problems, each a scene of boxes and capsules with a start and a goal, exported
+once to [`mbm_panda.txt`](mbm_panda.txt). One problem (table pick 41) has its start or goal in
+collision and is skipped, as in VAMP's evaluation. Coven `59f8abb`, same machine and setup as above.
+
+### Construction and revalidation
+
+![Speedup per scenario](results/figures/10_mbm_scaling.png)
+
+10,000 nodes, built in each scenario's first scene; revalidation after its obstacles move 5 cm. The
+speedups hold on every scenario: construction 11.4–11.7× over VAMP's serial PRM (1.45–1.73 s serial),
+revalidation 13.1–13.3× over one thread (1.35–1.57 s on one thread, 100–120 ms on 16).
+
+### Problems solved
+
+![Problems solved](results/figures/11_mbm_success.png)
+
+The service plans on one roadmap built once in free space, so a problem is solved only when the
+roadmap reaches through the scene from its start to its goal. VAMP's RRT-Connect searches each problem
+from scratch and solves all of them.
+
+| Scenario | 5,000 nodes | 10,000 | 20,000 | 50,000 | 10,000, 8 connections |
+|---|---|---|---|---|---|
+| Bookshelf small | 69% | 75% | 81% | 80% | 48% |
+| Bookshelf tall | 86% | 85% | 86% | 91% | 50% |
+| Bookshelf thin | 83% | 92% | 95% | 95% | 61% |
+| Box | 99% | 99% | 99% | 100% | 94% |
+| Cage | 0% | 4% | 10% | 38% | 1% |
+| Table pick | 100% | 98% | 97% | 97% | 65% |
+| Table under pick | 100% | 99% | 100% | 100% | 67% |
+
+- **Connections matter more than size.** MotionBenchMaker starts and goals sit in tight spots, between
+  shelves or beside objects, where the nearest few roadmap vertices are often not reachable in a
+  straight line. Trying 64 vertices instead of 8 adds 5–35 points at 10,000 nodes outside the cage; going from 5,000 to
+  50,000 nodes adds at most 12 outside the cage. 64 is now the default.
+- **The cage needs narrow passages** that a roadmap built in free space rarely covers: 4% at 10,000
+  nodes, 38% at 50,000.
+
+### Time and path length
+
+![Time per problem and path length](results/figures/12_mbm_time.png)
+
+Time to a path in a new scene, median over the problems each method solved (for Coven, the problems
+its roadmap reaches, which leaves out some of the hardest):
+
+| | Scene setup | Plan | Total |
+|---|---|---|---|
+| VAMP RRT-Connect, 1 thread | – | 0.03–0.08 ms (cage 0.25) | 0.03–0.08 ms |
+| Coven lazy, 16 threads | 0.49–0.57 ms | 0.31–0.60 ms (cage 105) | 0.81–1.10 ms |
+| Coven lazy, 1 thread | 6.7–7.8 ms | 0.66–0.83 ms | 7.6–8.6 ms |
+| Coven eager, 16 threads | 76–102 ms | 0.42–0.50 ms | 82–103 ms |
+
+- **For one query in a new scene, RRT-Connect is 12–27 times faster** than the service, outside the
+  cage. About half of the service's time is the scene setup: checking all 10,000 vertices (lazy) or the whole
+  roadmap (eager) before planning.
+- **Once a scene is set up, a plan takes 0.3–0.6 ms**, and every further request in that scene shares
+  the checks already made; that is the case the service is for (see [Planning service](#planning-service)).
+- **Path length after VAMP's simplification is the same** as RRT-Connect's on the problems both solved
+  (median ratio 0.90–1.00), except in the cage (1.25). Before simplification Coven's paths are shorter
+  (5.9–6.7 against 6.6–10.6 in configuration space, cage aside).
 
 ## Reproduce
 

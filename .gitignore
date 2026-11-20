@@ -5,3 +5,6 @@ __pycache__/
 *.egg-info/
 bench/results/slurm-*
 .wslrun.sh
+
+# Web page dependencies (web/)
+node_modules/

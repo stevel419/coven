@@ -1,0 +1,23 @@
+{
+  "name": "coven-web",
+  "private": true,
+  "type": "module",
+  "description": "Web page of the Coven planning service. `npm run build` writes it to ../coven/web.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@react-three/drei": "9.122.0",
+    "@react-three/fiber": "8.18.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "three": "0.170.0",
+    "urdf-loader": "0.12.6",
+    "zustand": "4.5.7"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "4.7.0",
+    "vite": "5.4.21"
+  }
+}

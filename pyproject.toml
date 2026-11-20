@@ -12,6 +12,7 @@ requires-python = ">=3.10"
 dependencies = [
     "vamp-planner @ git+https://github.com/KavrakiLab/vamp.git@27cb9b66ebd8d101ce88d330f3b028398afc1cfa",
     "numpy",
+    "pyyaml",
 ]
 
 [project.scripts]

@@ -5,14 +5,17 @@ Run after installing the package: pytest tests
 
 import http.client
 import json
+import math
+import re
 import threading
+import time
 
 import numpy as np
 import pytest
 import vamp
 
 import coven
-from coven import build_roadmap
+from coven import build_roadmap, problems
 from coven.server import make_server
 
 from test_replanner import CAGE, GOAL, START, cage, motion_valid
@@ -84,6 +87,98 @@ def test_concurrent_clients(server):
         thread.join()
     assert len(results) == 16
     assert all(status == 200 and len(body["path"]) > 2 for status, body in results)
+
+
+def get(server, path):
+    connection = http.client.HTTPConnection(*server.server_address, timeout=30)
+    connection.request("GET", path)
+    response = connection.getresponse()
+    data = response.read()
+    connection.close()
+    return response.status, response.getheader("Content-Type"), data
+
+
+def test_web_page(server):
+    status, content_type, page = get(server, "/")
+    assert status == 200 and content_type.startswith("text/html")
+    script = re.search(r'src="\./(assets/[^"]+\.js)"', page.decode()).group(1)
+    status, content_type, _ = get(server, f"/{script}")
+    assert status == 200 and "javascript" in content_type
+    for path in ("/panda/../server.py", "/../server.py", "/assets/../../server.py", "/%2e%2e/server.py"):
+        assert get(server, path)[0] == 404, path
+
+
+def test_problem_conversion():
+    """A MoveIt scene and request become a service scene, start and goal, as in VAMP's converter."""
+    quarter = [0, 0, math.sin(math.pi / 8), math.cos(math.pi / 8)]  # 45 degrees about z, (x, y, z, w)
+    data = {"world": {"collision_objects": [
+        {"id": "ball", "primitives": [{"type": "sphere", "dimensions": [0.1]}],
+         "primitive_poses": [{"position": [1, 0, 0], "orientation": [0, 0, 0, 1]}]},
+        {"id": "can", "primitives": [{"type": "cylinder", "dimensions": [0.2, 0.05]}],
+         "primitive_poses": [{"position": [0, 1, 0], "orientation": quarter}]},
+        {"id": "crate", "pose": {"position": [0, 0, 1], "orientation": [0, 0, 0, 1]},
+         "primitives": [{"type": "box", "dimensions": [0.2, 0.4, 0.6]}],
+         "primitive_poses": [{"position": [0.5, 0, 0], "orientation": quarter}]},
+    ]}}
+    scene = problems.scene(data, "table_pick")
+    assert scene["spheres"] == [{"name": "ball", "center": [1.0, 0.0, 0.0], "radius": 0.1}]
+    can, = scene["capsules"]
+    assert can["radius"] == 0.05 and can["length"] == 0.2 and can["euler"] == pytest.approx([0, 0, math.pi / 4])
+    crate, = scene["cuboids"]
+    assert crate["center"] == pytest.approx([0.5, 0, 1]) and crate["half_extents"] == pytest.approx([0.1, 0.2, 0.3])
+
+    # In "box", VAMP replaces cylinders by boxes around them
+    boxed = problems.scene(data, "box")
+    assert not boxed["capsules"] and boxed["cuboids"][0]["half_extents"] == [0.05, 0.05, 0.1]
+
+    names = [f"panda_joint{i}" for i in range(1, 8)]
+    start, goal = problems.request({
+        "start_state": {"joint_state": {"name": names[::-1], "position": list(range(7))[::-1]}},
+        "goal_constraints": [{"joint_constraints": [{"joint_name": n, "position": 10 + i} for i, n in enumerate(names)]}],
+    })
+    assert start == list(range(7)) and goal == [10 + i for i in range(7)]
+
+
+def test_limits():
+    service = coven.panda.Service(build_roadmap(500, START, GOAL), threads=1)
+    server = make_server(service, port=0, max_scenes=2, scene_ttl=0.5)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        plan = {"start": START.tolist(), "goal": GOAL.tolist()}
+
+        # A third scene drops the least recently used one
+        for name in ("a", "b"):
+            assert request(server, "PUT", f"/scenes/{name}", {})[0] == 200
+        assert request(server, "POST", "/scenes/a/plan", plan)[0] == 200  # a is now the newer one
+        assert request(server, "PUT", "/scenes/c", {})[0] == 200
+        assert request(server, "POST", "/scenes/b/plan", plan)[0] == 404
+        assert request(server, "POST", "/scenes/a/plan", plan)[0] == 200
+
+        # Unused scenes expire
+        time.sleep(0.7)
+        assert request(server, "PUT", "/scenes/d", {})[0] == 200
+        assert request(server, "POST", "/scenes/a/plan", plan)[0] == 404
+        assert request(server, "POST", "/scenes/d/plan", plan)[0] == 200
+
+        # Too many obstacles, too large a body
+        many = {"spheres": [{"center": [3, 3, 3], "radius": 0.1}] * 501}
+        assert request(server, "PUT", "/scenes/e", many)[0] == 400
+        connection = http.client.HTTPConnection(*server.server_address, timeout=30)
+        connection.putrequest("PUT", "/scenes/e")
+        connection.putheader("Content-Length", str(2 << 20))
+        connection.endheaders()
+        assert connection.getresponse().status == 413
+        connection.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_capsules(server):
+    body = {"capsules": [{"center": [3, 3, 3], "euler": [0, 0, 0], "radius": 0.1, "length": 0.3}]}
+    assert request(server, "PUT", "/scenes/capsule", body)[0] == 200
+    bad = {"capsules": [{"center": [3, 3, 3], "radius": 0, "length": 0.3}]}
+    assert request(server, "PUT", "/scenes/capsule", bad)[0] == 400
 
 
 def test_errors(server):

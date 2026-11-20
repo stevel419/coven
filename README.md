@@ -15,14 +15,14 @@ Coven checks them across all cores with OpenMP, and reuses the roadmap as obstac
 - **11× faster construction, 13–14× faster revalidation** on 16 cores.
 - **Replanning on a fixed roadmap.** Recheck every vertex and edge after the obstacles move, then
   search what is still valid.
-- **Planning service.** One roadmap serves many clients over HTTP, collision checks are batched
+- **Planning service.** One roadmap serves many clients over HTTP and batches collision checks 
   into one parallel loop.
 - **Header-only C++17 and Python.** Bindings for every VAMP robot, using VAMP's own Python types.
   VAMP itself is unmodified and pinned by commit.
 
 ## Quick start
 
-- **Requirements**: Linux or WSL2 with an AVX2 CPU, GCC 11+ or Clang, CMake 3.16+ and Python 3.10+.
+- Requires Linux or WSL2 with an AVX2 CPU, GCC 11+ or Clang, CMake 3.16+ and Python 3.10+.
 
 ```bash
 git clone https://github.com/stevel419/coven.git && cd coven
@@ -81,17 +81,18 @@ curl -X POST localhost:8000/scenes/cell/plan \
   -d '{"start": [0, -0.785, 0, -2.356, 0, 1.571, 0.785], "goal": [2.35, 1, 0, -0.8, 0, 2.5, 0.785]}'
 ```
 
-- **Scenes.** Any number of named obstacle sets share one roadmap. Each reply names the scene version
-  its path is collision-free in.
-- **Batching.** Requests that arrive together are planned in rounds: every request's shortest route is
-  found, the unchecked edges on all routes are checked in one parallel loop (once each, when routes
-  share them), and the requests whose route is valid are answered.
-- **Lazy or eager.** By default only edges on candidate routes are checked (Lazy PRM). `--eager`
-  rechecks the whole roadmap on every scene change.
+The planning service ([`coven::Service`](include/coven/service.hh)) plans requests in rounds:
 
-API: [`coven/server.py`](coven/server.py).
+- each request finds its shortest route, assuming unchecked edges are free (Lazy PRM)
+- the unchecked edges on all routes are checked in one parallel loop
+- requests whose route is valid are answered; the rest search again
+- `--eager` rechecks the whole roadmap on every scene change instead
+
+Open http://127.0.0.1:8000 to play with an interactive demo!
+
+API: [`coven/server.py`](coven/server.py)
 - C++: `coven::Service` in [`include/coven/service.hh`](include/coven/service.hh)
-- Python: `coven.panda.Service`.
+- Python: `coven.panda.Service`
 
 ## Performance
 

@@ -16,9 +16,7 @@ import argparse
 import logging
 import threading
 import time
-import urllib.request
 from collections import deque
-from pathlib import Path
 
 import numpy as np
 import viser
@@ -28,6 +26,7 @@ from viser.extras import ViserUrdf
 
 import coven
 from coven import Replanner, build_roadmap
+from coven.panda_model import panda_urdf
 
 robot = vamp.panda
 # yourdfpy warns on every pose update that the Panda's second finger mimics an unactuated joint
@@ -36,27 +35,10 @@ POSES = [
     np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785], dtype=np.float32),
     np.array([2.35, 1.0, 0.0, -0.8, 0, 2.5, 0.785], dtype=np.float32),
 ]
-# The Panda model comes from the VAMP commit that coven builds against (see CMakeLists.txt)
-VAMP_COMMIT = "27cb9b66ebd8d101ce88d330f3b028398afc1cfa"
-PANDA_FILES = ["panda_spherized.urdf", "meshes/collision/link0.obj", "meshes/collision/link7.obj"] + [
-    f"meshes/visual/{name}.obj" for name in ("finger", "hand", "link1", "link2", "link3", "link4", "link5", "link6")]
 JOINT_SPEED = 0.8  # radians per second along the path
 MAX_DRAWN_EDGES = 600
 LANE_OFFSET = 1.3
 VALID, INVALID, PATH = (190, 200, 215), (227, 73, 72), (27, 175, 122)
-
-
-def panda_urdf():
-    """Path to VAMP's Panda URDF, downloading it and its meshes (about 9 MB) on first use."""
-    cache = Path.home() / ".cache" / "coven" / VAMP_COMMIT[:12] / "panda"
-    for name in PANDA_FILES:
-        path = cache / name
-        if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            url = f"https://raw.githubusercontent.com/KavrakiLab/vamp/{VAMP_COMMIT}/resources/panda/{name}"
-            urllib.request.urlretrieve(url, path.with_suffix(".part"))
-            path.with_suffix(".part").replace(path)
-    return cache / "panda_spherized.urdf"
 
 
 class Obstacles:

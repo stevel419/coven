@@ -8,8 +8,9 @@
 # revalidate    full recheck of a roadmap, threads x roadmap size, and threads x schedule (figure 5)
 # service       planning service load tests with coven_load (next to coven_bench)  (figures 6, 7, 8)
 # service-http  the same service over HTTP with bench/load.py, and in process     (figure 9)
-# mbm           MotionBenchMaker: construction and revalidation per scenario, and every problem
-#               with VAMP's RRT-Connect and with the service (coven_mbm)       (figures 10, 11, 12)
+# mbm           MotionBenchMaker: construction and revalidation per scenario  (figure 10)
+# mbm-problems  every MotionBenchMaker problem with VAMP's RRT-Connect and with the service, using
+#               coven_mbm next to coven_bench                                  (figures 11, 12)
 #               (needs the Python package installed: pip install .)
 # quick         a few small runs of every kind, to test the pipeline
 #
@@ -44,8 +45,10 @@ commit=$(git -C "$here" rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 mkdir -p "$(dirname "$out")"
 load=$(dirname "$bench")/coven_load
+mbm=$(dirname "$bench")/coven_mbm
 case $sweep in
 service*) [ -s "$out" ] || "$load" --header > "$out" ;;
+mbm-problems) [ -s "$out" ] || "$mbm" --header > "$out" ;;
 *) [ -s "$out" ] || "$bench" --header --mode serial --nodes 10 --repeats 0 --warmup 0 > "$out" ;;
 esac
 
@@ -134,9 +137,7 @@ service)
     done
     ;;
 mbm)
-    # MotionBenchMaker. Construction and revalidation in each scenario's first scene, as above, with
-    # coven_bench; then every problem with VAMP's RRT-Connect and with the planning service, with
-    # coven_mbm, into a second file next to $out.
+    # MotionBenchMaker: construction and revalidation in each scenario's first scene, as above
     r=$(((repeats + 1) / 2))
     for scenario in bookshelf_small bookshelf_tall bookshelf_thin box cage table_pick table_under_pick; do
         run --mode serial --env "mbm:$scenario" --nodes 10000 --repeats "$r"
@@ -145,20 +146,18 @@ mbm)
             run --mode revalidate --env "mbm:$scenario" --nodes 10000 --threads "$t" --repeats "$r"
         done
     done
-
-    mbm=$(dirname "$bench")/coven_mbm
-    problems=${out%.csv}_problems.csv
-    [ -s "$problems" ] || "$mbm" --header > "$problems"
+    ;;
+mbm-problems)
+    # Every MotionBenchMaker problem with VAMP's RRT-Connect and with the planning service (coven_mbm)
     mbm_run() {
         echo "coven_mbm $*" >&2
-        "$mbm" --commit "$commit" "$@" >> "$problems"
+        "$mbm" --commit "$commit" "$@" >> "$out"
     }
     mbm_run --method rrtc
     for nodes in 5000 10000 20000 50000; do
-        for connections in 8 64; do
-            mbm_run --method lazy --nodes "$nodes" --connections "$connections" --threads "$cores"
-        done
+        mbm_run --method lazy --nodes "$nodes" --threads "$cores"
     done
+    mbm_run --method lazy --nodes 10000 --connections 8 --threads "$cores"
     mbm_run --method lazy --nodes 10000 --threads 1
     mbm_run --method eager --nodes 10000 --threads "$cores"
     ;;

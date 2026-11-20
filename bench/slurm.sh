@@ -8,7 +8,7 @@
 # one sweep per job, with the partition and the compiler modules of your cluster:
 #
 #   mkdir -p bench/results
-#   MODULES="gcc cmake" sbatch -p <partition> bench/slurm.sh <scaling|sizes|revalidate|service|mbm|quick>
+#   MODULES="gcc cmake" sbatch -p <partition> bench/slurm.sh <scaling|sizes|revalidate|service|mbm|mbm-problems|quick>
 #
 # service-http also needs the Python package (pip install .) in the job's environment.
 #
@@ -17,7 +17,7 @@
 # exclusive node; add --dependency=singleton to run your jobs one at a time.
 set -euo pipefail
 
-sweep=${1:?usage: sbatch bench/slurm.sh <scaling|sizes|revalidate|service|service-http|mbm|quick>}
+sweep=${1:?usage: sbatch bench/slurm.sh <scaling|sizes|revalidate|service|service-http|mbm|mbm-problems|quick>}
 
 # Toolchain: GCC 11 or newer and CMake 3.16 or newer
 if [ -n "${MODULES:-}" ]; then

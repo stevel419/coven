@@ -179,14 +179,15 @@ time per phase, edges checked, roadmap size, commit, compiler and CPU.
 | `revalidate` | threads × roadmap size (5,000 to 100,000), threads × schedule at 20,000 nodes | 0, 3, 5 |
 | `service` | request rate × batching window, × threads and shared or separate scenes, × lazy or eager and how often obstacles move | 6, 7, 8 |
 | `service-http` | request rate, over HTTP and in process (needs `pip install .`) | 9 |
-| `mbm` | MotionBenchMaker: construction and revalidation per scenario; every problem with VAMP's RRT-Connect and with the service, by roadmap size and start and goal connections | 10, 11, 12 |
+| `mbm` | MotionBenchMaker: construction and revalidation per scenario, 10,000 nodes | 10 |
+| `mbm-problems` | every MotionBenchMaker problem with VAMP's RRT-Connect and with the service, by roadmap size and start and goal connections | 11, 12 |
 
 From the repository root:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j --target coven_bench coven_load coven_mbm
 build/coven_bench --check --mode parallel --nodes 5000 --threads 8 --repeats 0 --warmup 0
-for sweep in scaling sizes revalidate service mbm; do bash bench/sweep.sh $sweep build/coven_bench bench/results/$sweep.csv; done
+for sweep in scaling sizes revalidate service mbm mbm-problems; do bash bench/sweep.sh $sweep build/coven_bench bench/results/$sweep.csv; done
 python bench/plot.py bench/results/*.csv --out bench/results/figures
 ```
 

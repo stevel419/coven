@@ -1,5 +1,11 @@
 # Coven
 
+[![Build Check](https://img.shields.io/github/actions/workflow/status/stevel419/coven/build.yml?branch=main&label=Build%20Check&logo=github)](https://github.com/stevel419/coven/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/stevel419/coven?label=release&color=orange)](https://github.com/stevel419/coven/releases/latest)
+[![VAMP](https://img.shields.io/badge/VAMP-27cb9b6-blue?logo=github)](https://github.com/KavrakiLab/vamp/tree/27cb9b66ebd8d101ce88d330f3b028398afc1cfa)
+![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C)
+![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB)
+
 Multi-core PRM roadmap construction and replanning built on [VAMP](https://github.com/KavrakiLab/vamp).
 
 ![Serial and parallel replanning side by side](demo/recording.gif)

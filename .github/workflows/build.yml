@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build
@@ -24,11 +24,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      # VAMP's build writes its type stubs elsewhere when GITHUB_ACTIONS is set (for its own CI) and
+      # then cannot find them to install
       - name: Install
-        run: pip install ".[test]"
+        run: env -u GITHUB_ACTIONS pip install ".[test]"
       - name: Test
         run: pytest
